@@ -29,6 +29,7 @@ from qdrant_client.models import (
     PayloadSchemaType,
     Filter,
     FieldCondition,
+    MatchAny,
     MatchValue,
     PointStruct,
     SearchRequest,
@@ -210,10 +211,15 @@ def search(
     query_vector: list[float],
     top_k: int = 8,
     payer_filter: str = None,
+    payer_filters: list[str] = None,
     payer_type_filter: str = None,
     policy_category_filter: str = None,
+    policy_category_filters: list[str] = None,
     version_label_filter: str = None,
+    version_label_filters: list[str] = None,
     coverage_status_filter: str = None,
+    coverage_status_filters: list[str] = None,
+    policy_version_ids: list[str] = None,
 ) -> list[dict]:
     """
     Semantic search with optional metadata filters.
@@ -224,26 +230,25 @@ def search(
     # Build Qdrant filter conditions
     conditions = []
 
-    if payer_filter:
-        conditions.append(FieldCondition(
-            key="payer_name", match=MatchValue(value=payer_filter)
-        ))
+    def add_string_filter(key: str, one: str = None, many: list[str] = None):
+        values = [v for v in (many or []) if v]
+        if values:
+            if len(values) == 1 and not one:
+                conditions.append(FieldCondition(key=key, match=MatchValue(value=values[0])))
+            else:
+                conditions.append(FieldCondition(key=key, match=MatchAny(any=values)))
+        elif one:
+            conditions.append(FieldCondition(key=key, match=MatchValue(value=one)))
+
+    add_string_filter("payer_name", payer_filter, payer_filters)
     if payer_type_filter:
         conditions.append(FieldCondition(
             key="payer_type", match=MatchValue(value=payer_type_filter)
         ))
-    if policy_category_filter:
-        conditions.append(FieldCondition(
-            key="policy_category", match=MatchValue(value=policy_category_filter)
-        ))
-    if version_label_filter:
-        conditions.append(FieldCondition(
-            key="version_label", match=MatchValue(value=version_label_filter)
-        ))
-    if coverage_status_filter:
-        conditions.append(FieldCondition(
-            key="coverage_status", match=MatchValue(value=coverage_status_filter)
-        ))
+    add_string_filter("policy_category", policy_category_filter, policy_category_filters)
+    add_string_filter("version_label", version_label_filter, version_label_filters)
+    add_string_filter("coverage_status", coverage_status_filter, coverage_status_filters)
+    add_string_filter("policy_version_id", None, policy_version_ids)
 
     qdrant_filter = Filter(must=conditions) if conditions else None
 

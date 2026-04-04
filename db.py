@@ -60,6 +60,9 @@ def execute(conn, sql: str, params=()) -> Optional[str]:
     """Executes SQL, returns first column of first row (useful for RETURNING id)."""
     with conn.cursor() as cur:
         cur.execute(sql, params)
+        # UPDATE/DELETE without RETURNING has no result set.
+        if cur.description is None:
+            return None
         row = cur.fetchone()
         return str(row[0]) if row else None
 
@@ -81,6 +84,10 @@ def upsert_payer(conn, name: str, payer_type: str = "commercial", region: str = 
 
 def get_payer_by_name(conn, name: str) -> Optional[dict]:
     return fetchone(conn, "SELECT * FROM payers WHERE name = %s", (name,))
+
+
+def get_payer(conn, payer_id: str) -> Optional[dict]:
+    return fetchone(conn, "SELECT * FROM payers WHERE id = %s", (payer_id,))
 
 
 def list_payers(conn) -> list[dict]:
@@ -105,6 +112,16 @@ def list_plans_for_payer(conn, payer_id: str) -> list[dict]:
     return fetchall(conn,
         "SELECT * FROM plans WHERE payer_id = %s ORDER BY plan_name",
         (payer_id,)
+    )
+
+
+def list_plans_by_ids(conn, plan_ids: list[str]) -> list[dict]:
+    if not plan_ids:
+        return []
+    return fetchall(
+        conn,
+        "SELECT * FROM plans WHERE id = ANY(%s)",
+        (plan_ids,),
     )
 
 

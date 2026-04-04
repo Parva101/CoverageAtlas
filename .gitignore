@@ -9,3 +9,4 @@ insurance_policies/
 .pytest_cache/
 backend/.env
 backend/.env.local
+coverageatlas-492308-dd5a89f49ca8.json

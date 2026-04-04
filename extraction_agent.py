@@ -29,6 +29,12 @@ from pathlib import Path
 from datetime import datetime, date
 from typing import Optional
 
+import db as db_layer
+try:
+    import qdrant_setup as qdrant_layer
+except ImportError:
+    qdrant_layer = None
+
 # ── Gemini ─────────────────────────────────────────────────────────────────
 import google.generativeai as genai
 
@@ -462,103 +468,60 @@ CREATE INDEX IF NOT EXISTS idx_cr_review  ON coverage_rules(needs_review) WHERE 
 def get_db():
     if not PSQL_AVAILABLE:
         raise RuntimeError("psycopg2 not installed: pip install psycopg2-binary")
-    conn = psycopg2.connect(DATABASE_URL)
-    conn.autocommit = False
-    return conn
+    return psycopg2.connect(DATABASE_URL)
 
 
 def init_schema(conn):
-    with conn.cursor() as cur:
-        cur.execute(INIT_SQL)
+    schema_path = Path(__file__).with_name("schema.sql")
+    with schema_path.open("r", encoding="utf-8") as fh, conn.cursor() as cur:
+        cur.execute(fh.read())
     conn.commit()
     log.info("PostgreSQL schema initialized.")
 
 
 def upsert_payer(conn, payer_name: str) -> str:
-    with conn.cursor() as cur:
-        cur.execute("""
-            INSERT INTO payers (name) VALUES (%s)
-            ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name
-            RETURNING id
-        """, (payer_name,))
-        return str(cur.fetchone()[0])
+    return db_layer.upsert_payer(conn, payer_name)
 
 
 def upsert_policy(conn, payer_id: str, policy_title: str, category: str = "medical_benefit") -> str:
-    with conn.cursor() as cur:
-        cur.execute("""
-            INSERT INTO policies (payer_id, policy_title, policy_category)
-            VALUES (%s, %s, %s)
-            ON CONFLICT DO NOTHING
-            RETURNING id
-        """, (payer_id, policy_title, category))
-        row = cur.fetchone()
-        if row:
-            return str(row[0])
-        cur.execute("SELECT id FROM policies WHERE payer_id=%s AND policy_title=%s",
-                    (payer_id, policy_title))
-        return str(cur.fetchone()[0])
+    return db_layer.upsert_policy(
+        conn,
+        payer_id,
+        policy_title,
+        policy_category=category,
+    )
 
 
 def create_policy_version(conn, policy_id: str, version_label: str,
-                          file_path: str, file_sha: str,
+                          document_id: str,
                           source_url: str = None,
                           effective_date: str = None) -> str:
-    # Mark previous versions as not current
-    with conn.cursor() as cur:
-        cur.execute("UPDATE policy_versions SET is_current=FALSE WHERE policy_id=%s", (policy_id,))
-        cur.execute("""
-            INSERT INTO policy_versions
-              (policy_id, version_label, effective_date, source_url, file_path, file_sha256, is_current)
-            VALUES (%s, %s, %s, %s, %s, %s, TRUE)
-            RETURNING id
-        """, (policy_id, version_label,
-              effective_date or date.today().isoformat(),
-              source_url, file_path, file_sha))
-        return str(cur.fetchone()[0])
+    return db_layer.create_policy_version(
+        conn,
+        policy_id,
+        document_id,
+        version_label,
+        effective_date=effective_date,
+        published_date=None,
+        source_url=source_url,
+    )
 
 
 def insert_chunk(conn, policy_version_id: str, chunk_index: int,
                  section: dict, qdrant_id: str = None) -> str:
-    with conn.cursor() as cur:
-        cur.execute("""
-            INSERT INTO policy_chunks
-              (policy_version_id, chunk_index, section_title, page_number, text, qdrant_point_id)
-            VALUES (%s, %s, %s, %s, %s, %s)
-            RETURNING id
-        """, (policy_version_id, chunk_index,
-              section["section_title"], section["page_num"],
-              section["text"][:8000],   # cap at 8K chars
-              qdrant_id))
-        return str(cur.fetchone()[0])
+    return db_layer.insert_chunk(
+        conn,
+        policy_version_id=policy_version_id,
+        chunk_index=chunk_index,
+        section_title=section["section_title"],
+        page_number=section["page_num"],
+        text=section["text"],
+        embedding_id=qdrant_id,
+    )
 
 
 def insert_coverage_rule(conn, policy_version_id: str, rule: dict) -> str:
-    with conn.cursor() as cur:
-        cur.execute("""
-            INSERT INTO coverage_rules (
-                policy_version_id, drug_name, drug_aliases, indication,
-                coverage_status, prior_auth_required, step_therapy_required,
-                quantity_limit_text, site_of_care_text, criteria_summary,
-                raw_evidence_ref, extraction_confidence, needs_review
-            ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-            RETURNING id
-        """, (
-            policy_version_id,
-            rule["drug_name"],
-            json.dumps(rule["drug_aliases"]),
-            rule["indication"],
-            rule["coverage_status"],
-            rule["prior_auth_required"],
-            rule["step_therapy_required"],
-            rule["quantity_limit_text"],
-            rule["site_of_care_text"],
-            json.dumps(rule["criteria_summary"]),
-            json.dumps(rule["citations"]),
-            rule["extraction_confidence"],
-            rule["needs_review"],
-        ))
-        return str(cur.fetchone()[0])
+    return db_layer.insert_coverage_rule(conn, policy_version_id, rule)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -566,19 +529,12 @@ def insert_coverage_rule(conn, policy_version_id: str, rule: dict) -> str:
 # ══════════════════════════════════════════════════════════════════════════════
 
 def get_qdrant() -> Optional["QdrantClient"]:
-    if not QDRANT_AVAILABLE:
-        log.warning("qdrant-client not installed — skipping vector index.")
+    if not QDRANT_AVAILABLE or qdrant_layer is None:
+        log.warning("qdrant-client not installed - skipping vector index.")
         return None
     try:
-        client = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY or None, timeout=10)
-        # Create collection if not exists
-        existing = [c.name for c in client.get_collections().collections]
-        if QDRANT_COLLECTION not in existing:
-            client.create_collection(
-                collection_name=QDRANT_COLLECTION,
-                vectors_config=VectorParams(size=VECTOR_DIM, distance=Distance.COSINE),
-            )
-            log.info(f"Created Qdrant collection: {QDRANT_COLLECTION}")
+        client = qdrant_layer.get_client()
+        qdrant_layer.init_collection(client, reset=False)
         return client
     except Exception as e:
         log.warning(f"Qdrant unavailable: {e}")
@@ -597,37 +553,36 @@ def embed_batch(texts: list[str]) -> list[list[float]]:
 def upsert_chunks_to_qdrant(client, sections: list[dict],
                              policy_meta: dict) -> list[str]:
     """Embeds sections and upserts to Qdrant. Returns list of point IDs."""
-    if not client or not sections:
+    if not client or not sections or qdrant_layer is None:
         return []
 
-    texts   = [s["text"] for s in sections]
+    texts = [s["text"] for s in sections]
     vectors = embed_batch(texts)
-    points  = []
-    ids     = []
+    chunks = []
 
-    for i, (section, vector) in enumerate(zip(sections, vectors)):
-        point_id = str(uuid.uuid4())
-        ids.append(point_id)
-        points.append(PointStruct(
-            id=point_id,
-            vector=vector,
-            payload={
-                "payer":         policy_meta["payer"],
-                "policy_title":  policy_meta["policy_title"],
-                "version_label": policy_meta["version_label"],
-                "section_title": section["section_title"],
-                "page_num":      section["page_num"],
-                "text":          section["text"][:2000],
-            }
-        ))
+    for i, section in enumerate(sections):
+        chunks.append({
+            "policy_version_id": policy_meta.get("policy_version_id", ""),
+            "chunk_id": str(uuid.uuid4()),
+            "chunk_index": i,
+            "payer_name": policy_meta.get("payer_name", ""),
+            "payer_type": policy_meta.get("payer_type", "commercial"),
+            "policy_title": policy_meta.get("policy_title", ""),
+            "policy_category": policy_meta.get("policy_category", "medical_benefit"),
+            "version_label": policy_meta.get("version_label", ""),
+            "effective_date": policy_meta.get("effective_date", ""),
+            "source_url": policy_meta.get("source_url", ""),
+            "section_title": section["section_title"],
+            "page_number": section["page_num"],
+            "text": section["text"],
+        })
 
-    client.upsert(collection_name=QDRANT_COLLECTION, points=points)
-    log.info(f"  Qdrant: upserted {len(points)} vectors")
+    ids = qdrant_layer.upsert_chunks(client, chunks=chunks, embeddings=vectors)
+    log.info(f"  Qdrant: upserted {len(ids)} vectors")
     return ids
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# DIFF ENGINE — detects changes between policy versions
+# DIFF ENGINE - detects changes between policy versions
 # ══════════════════════════════════════════════════════════════════════════════
 
 COMPARABLE_FIELDS = [
@@ -640,70 +595,76 @@ def detect_changes(conn, policy_id: str, from_version_id: str, to_version_id: st
     Compares coverage_rules between two versions of the same policy.
     Writes change records to policy_changes table.
     """
-    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-        def get_rules(version_id):
-            cur.execute(
-                "SELECT * FROM coverage_rules WHERE policy_version_id=%s",
-                (version_id,)
+    old_rules = {
+        r["drug_name"].lower(): r
+        for r in db_layer.get_rules_for_version(conn, from_version_id)
+    }
+    new_rules = {
+        r["drug_name"].lower(): r
+        for r in db_layer.get_rules_for_version(conn, to_version_id)
+    }
+
+    changes = []
+    all_drugs = set(old_rules) | set(new_rules)
+
+    for drug in all_drugs:
+        if drug not in old_rules:
+            changes.append(("added", drug, None, new_rules[drug]))
+        elif drug not in new_rules:
+            changes.append(("removed", drug, old_rules[drug], None))
+        else:
+            old, new = old_rules[drug], new_rules[drug]
+            for field in COMPARABLE_FIELDS:
+                oval = str(old.get(field) or "")
+                nval = str(new.get(field) or "")
+                if oval != nval:
+                    changes.append(("modified", drug, old, new, field, oval, nval))
+
+    for change in changes:
+        change_type = change[0]
+        drug = change[1]
+
+        if change_type == "added":
+            rule = change[3]
+            db_layer.insert_policy_change(
+                conn=conn,
+                policy_id=policy_id,
+                from_version_id=from_version_id,
+                to_version_id=to_version_id,
+                change_type="added",
+                field_name="drug_name",
+                old_value=None,
+                new_value=drug,
+                citations=rule.get("raw_evidence_ref") or [],
             )
-            return {r["drug_name"].lower(): dict(r) for r in cur.fetchall()}
+        elif change_type == "removed":
+            db_layer.insert_policy_change(
+                conn=conn,
+                policy_id=policy_id,
+                from_version_id=from_version_id,
+                to_version_id=to_version_id,
+                change_type="removed",
+                field_name="drug_name",
+                old_value=drug,
+                new_value=None,
+                citations=[],
+            )
+        else:
+            _, _, _, _, field, oval, nval = change
+            db_layer.insert_policy_change(
+                conn=conn,
+                policy_id=policy_id,
+                from_version_id=from_version_id,
+                to_version_id=to_version_id,
+                change_type="modified",
+                field_name=field,
+                old_value=oval,
+                new_value=nval,
+                citations=[],
+            )
 
-        old_rules = get_rules(from_version_id)
-        new_rules = get_rules(to_version_id)
-
-        changes = []
-        all_drugs = set(old_rules) | set(new_rules)
-
-        for drug in all_drugs:
-            if drug not in old_rules:
-                changes.append(("added", drug, None, new_rules[drug]))
-            elif drug not in new_rules:
-                changes.append(("removed", drug, old_rules[drug], None))
-            else:
-                old, new = old_rules[drug], new_rules[drug]
-                for field in COMPARABLE_FIELDS:
-                    oval = str(old.get(field) or "")
-                    nval = str(new.get(field) or "")
-                    if oval != nval:
-                        changes.append(("modified", drug, old, new, field, oval, nval))
-
-        for change in changes:
-            change_type = change[0]
-            drug        = change[1]
-
-            if change_type == "added":
-                rule = change[3]
-                cur.execute("""
-                    INSERT INTO policy_changes
-                      (policy_id,from_version_id,to_version_id,change_type,
-                       field_name,old_value,new_value,citations)
-                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
-                """, (policy_id, from_version_id, to_version_id,
-                      "added", "drug_name", None, drug,
-                      json.dumps(rule.get("raw_evidence_ref") or [])))
-
-            elif change_type == "removed":
-                cur.execute("""
-                    INSERT INTO policy_changes
-                      (policy_id,from_version_id,to_version_id,change_type,
-                       field_name,old_value,new_value,citations)
-                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
-                """, (policy_id, from_version_id, to_version_id,
-                      "removed", "drug_name", drug, None, "[]"))
-
-            elif change_type == "modified":
-                _, _, _, _, field, oval, nval = change
-                cur.execute("""
-                    INSERT INTO policy_changes
-                      (policy_id,from_version_id,to_version_id,change_type,
-                       field_name,old_value,new_value,citations)
-                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
-                """, (policy_id, from_version_id, to_version_id,
-                      "modified", field, oval, nval, "[]"))
-
-        conn.commit()
-        log.info(f"  Diff: {len(changes)} changes written for policy {policy_id}")
-        return changes
+    log.info(f"  Diff: {len(changes)} changes written for policy {policy_id}")
+    return changes
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -711,69 +672,103 @@ def detect_changes(conn, policy_id: str, from_version_id: str, to_version_id: st
 # ══════════════════════════════════════════════════════════════════════════════
 
 def process_document(
-    file_path:    Path,
-    payer:        str,
+    file_path: Path,
+    payer: str,
     policy_title: str,
     version_label: str,
-    source_url:   str  = None,
+    source_url: str = None,
     effective_date: str = None,
-    dry_run:      bool = False,
-    conn          = None,
-    qdrant_client = None,
+    dry_run: bool = False,
+    conn=None,
+    qdrant_client=None,
+    document_id: str = None,
 ) -> dict:
     """
-    Full pipeline: file → sections → extract → validate → score → DB + Qdrant.
+    Full pipeline: file -> sections -> extract -> validate -> score -> DB + Qdrant.
     Returns summary dict with counts and extracted rules.
     """
-    log.info(f"\n{'═'*60}")
+    log.info(f"\n{'=' * 60}")
     log.info(f"Processing: {file_path.name}")
     log.info(f"  Payer: {payer} | Version: {version_label}")
 
-    # ── Step 1: Extract raw text by page ────────────────────────────────────
     pages = extract_pages(file_path)
     if not pages:
-        log.error("  No text extracted — skipping.")
+        log.error("  No text extracted - skipping.")
         return {"status": "failed", "reason": "no_text", "rules": []}
     log.info(f"  Extracted {len(pages)} pages of text")
 
-    # ── Step 2: Split into sections ──────────────────────────────────────────
     sections = split_into_sections(pages)
     log.info(f"  Split into {len(sections)} sections")
 
-    # ── Step 3: Compute file hash ────────────────────────────────────────────
     file_sha = hashlib.sha256(file_path.read_bytes()).hexdigest()
 
-    # ── Step 4: DB setup (unless dry run) ───────────────────────────────────
     policy_version_id = None
-    policy_id         = None
-    qdrant_ids        = []
+    policy_id = None
+    previous_version_id = None
+    qdrant_ids = []
+    resolved_document_id = document_id
 
     if not dry_run and conn:
-        payer_id   = upsert_payer(conn, payer)
-        policy_id  = upsert_policy(conn, payer_id, policy_title)
+        payer_id = upsert_payer(conn, payer)
+        payer_row = db_layer.get_payer_by_name(conn, payer)
+        policy_id = upsert_policy(conn, payer_id, policy_title)
+        policy_row = db_layer.get_policy(conn, policy_id) or {}
+        previous_version = db_layer.get_current_version(conn, policy_id)
+        previous_version_id = str(previous_version["id"]) if previous_version else None
+
+        if resolved_document_id is None:
+            suffix = file_path.suffix.lower()
+            if suffix == ".pdf":
+                file_type = "pdf"
+            elif suffix in (".html", ".htm"):
+                file_type = "html"
+            elif suffix == ".docx":
+                file_type = "docx"
+            else:
+                file_type = "other"
+
+            resolved_document_id = db_layer.insert_document(
+                conn=conn,
+                file_name=file_path.name,
+                file_type=file_type,
+                sha256=file_sha,
+                storage_path=str(file_path),
+                source_url=source_url,
+                payer_id=payer_id,
+            )
+
+        db_layer.update_document_status(conn, resolved_document_id, "processing")
         policy_version_id = create_policy_version(
-            conn, policy_id, version_label,
-            str(file_path), file_sha, source_url, effective_date
+            conn=conn,
+            policy_id=policy_id,
+            version_label=version_label,
+            document_id=resolved_document_id,
+            source_url=source_url,
+            effective_date=effective_date,
         )
         conn.commit()
 
-        # ── Step 5: Embed sections → Qdrant ─────────────────────────────────
         if qdrant_client:
-            policy_meta = {"payer": payer, "policy_title": policy_title,
-                           "version_label": version_label}
+            policy_meta = {
+                "policy_version_id": policy_version_id,
+                "payer_name": payer,
+                "payer_type": (payer_row or {}).get("payer_type", "commercial"),
+                "policy_title": policy_title,
+                "policy_category": policy_row.get("policy_category", "medical_benefit"),
+                "version_label": version_label,
+                "effective_date": effective_date or date.today().isoformat(),
+                "source_url": source_url or "",
+            }
             qdrant_ids = upsert_chunks_to_qdrant(qdrant_client, sections, policy_meta)
 
-        # ── Step 6: Write chunks to PostgreSQL ───────────────────────────────
         for i, section in enumerate(sections):
             qid = qdrant_ids[i] if i < len(qdrant_ids) else None
             insert_chunk(conn, policy_version_id, i, section, qid)
         conn.commit()
 
-    # ── Step 7: LLM extraction per section ──────────────────────────────────
     all_rules = []
     for i, section in enumerate(sections):
-        log.info(f"  [{i+1}/{len(sections)}] Extracting: {section['section_title'][:50]}")
-
+        log.info(f"  [{i + 1}/{len(sections)}] Extracting: {section['section_title'][:50]}")
         raw_rules = call_gemini_extractor(section["text"])
         if not raw_rules:
             continue
@@ -788,17 +783,31 @@ def process_document(
             if not dry_run and conn and policy_version_id:
                 insert_coverage_rule(conn, policy_version_id, scored)
 
-        time.sleep(0.5)   # rate limit
+        time.sleep(0.5)
 
     if not dry_run and conn:
         conn.commit()
+        if previous_version_id and policy_version_id:
+            detect_changes(
+                conn=conn,
+                policy_id=policy_id,
+                from_version_id=previous_version_id,
+                to_version_id=policy_version_id,
+            )
+            conn.commit()
 
-    # ── Step 8: Summary ──────────────────────────────────────────────────────
+        if resolved_document_id:
+            db_layer.update_document_status(conn, resolved_document_id, "completed")
+            conn.commit()
+
     review_count = sum(1 for r in all_rules if r["needs_review"])
-    avg_conf     = (sum(r["extraction_confidence"] for r in all_rules) / len(all_rules)
-                    if all_rules else 0)
+    avg_conf = (
+        sum(r["extraction_confidence"] for r in all_rules) / len(all_rules)
+        if all_rules
+        else 0
+    )
 
-    log.info(f"\n  {'─'*40}")
+    log.info(f"\n  {'-' * 40}")
     log.info(f"  Rules extracted  : {len(all_rules)}")
     log.info(f"  Needs review     : {review_count}")
     log.info(f"  Avg confidence   : {avg_conf:.2f}")
@@ -807,26 +816,28 @@ def process_document(
     if dry_run:
         log.info("\n  [DRY RUN] Sample extracted rules:")
         for r in all_rules[:3]:
-            log.info(f"    • {r['drug_name']} → {r['coverage_status']} "
-                     f"(PA={r['prior_auth_required']}, conf={r['extraction_confidence']:.2f})")
+            log.info(
+                f"    - {r['drug_name']} -> {r['coverage_status']} "
+                f"(PA={r['prior_auth_required']}, conf={r['extraction_confidence']:.2f})"
+            )
 
     return {
-        "status":             "completed",
-        "file":               str(file_path),
-        "payer":              payer,
-        "version_label":      version_label,
-        "policy_version_id":  policy_version_id,
-        "policy_id":          policy_id,
+        "status": "completed",
+        "file": str(file_path),
+        "payer": payer,
+        "version_label": version_label,
+        "document_id": resolved_document_id,
+        "policy_version_id": policy_version_id,
+        "policy_id": policy_id,
         "sections_processed": len(sections),
-        "rules_extracted":    len(all_rules),
-        "rules_need_review":  review_count,
-        "avg_confidence":     round(avg_conf, 3),
-        "rules":              all_rules,
+        "rules_extracted": len(all_rules),
+        "rules_need_review": review_count,
+        "avg_confidence": round(avg_conf, 3),
+        "rules": all_rules,
     }
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# SCAN DIRECTORY — processes all downloaded policy files
+# SCAN DIRECTORY - processes all downloaded policy files
 # ══════════════════════════════════════════════════════════════════════════════
 
 def scan_directory(root: Path, dry_run: bool = False, conn=None, qdrant=None):
@@ -840,7 +851,7 @@ def scan_directory(root: Path, dry_run: bool = False, conn=None, qdrant=None):
 
     if conn:
         with conn.cursor() as cur:
-            cur.execute("SELECT file_sha256 FROM policy_versions WHERE file_sha256 IS NOT NULL")
+            cur.execute("SELECT sha256 FROM documents WHERE sha256 IS NOT NULL")
             known_hashes = {r[0] for r in cur.fetchall()}
 
     for payer_dir in sorted(root.iterdir()):
@@ -938,3 +949,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+

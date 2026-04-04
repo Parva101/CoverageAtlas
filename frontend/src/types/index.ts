@@ -6,13 +6,6 @@ export type PolicyCategory = 'medical_benefit' | 'pharmacy_benefit' | 'general_u
 export type ChangeType = 'added' | 'removed' | 'modified';
 export type Channel = 'web' | 'voice';
 
-export interface Payer {
-  id: string;
-  name: string;
-  payer_type: PayerType;
-  region: string | null;
-}
-
 export interface Citation {
   document_id: string;
   page: number;

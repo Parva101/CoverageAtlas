@@ -5,11 +5,10 @@ import type {
   CompareResponse,
   PolicyChange,
   DocumentStatus,
-  Payer,
   VoiceSession,
 } from '../types';
 
-const BASE = '/api';
+const BASE = '/api/v1';
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
@@ -26,9 +25,6 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 // ── Health ──
 export const getHealth = () => request<{ status: string }>('/health');
 
-// ── Payers ──
-export const listPayers = () => request<Payer[]>('/payers');
-
 // ── Query (Q&A) ──
 export const postQuery = (body: QueryRequest) =>
   request<QueryResponse>('/query', {
@@ -44,8 +40,10 @@ export const postCompare = (body: CompareRequest) =>
   });
 
 // ── Policy Changes ──
-export const getPolicyChanges = (policyId: string) =>
-  request<PolicyChange[]>(`/policies/${policyId}/changes`);
+export const getPolicyChanges = (policyId: string, from: string, to: string) =>
+  request<{ policy_id: string; from_version: string; to_version: string; changes: PolicyChange[] }>(
+    `/policies/${policyId}/changes?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
+  );
 
 // ── Documents ──
 export const uploadDocument = async (
@@ -70,20 +68,31 @@ export const getDocumentStatus = (docId: string) =>
   request<DocumentStatus>(`/documents/${docId}/status`);
 
 // ── Source Scan ──
-export const triggerScan = () =>
-  request<{ job_id: string; message: string }>('/sources/scan', {
+export const triggerScan = (sourceGroup = 'default') =>
+  request<{ scan_id: string; status: string }>('/sources/scan', {
     method: 'POST',
+    body: JSON.stringify({ source_group: sourceGroup }),
   });
 
 // ── Voice ──
-export const startVoiceSession = () =>
-  request<VoiceSession>('/voice/session/start', { method: 'POST' });
+// Backend returns { session_id, status } — we normalize to { id, status }
+export const startVoiceSession = async (): Promise<VoiceSession> => {
+  const res = await request<{ session_id: string; status: string }>(
+    '/voice/session/start',
+    { method: 'POST', body: JSON.stringify({}) },
+  );
+  return { id: res.session_id, status: res.status as 'active' | 'ended', messages: [] };
+};
 
+// Backend expects { utterance } not { text }
 export const sendVoiceTurn = (sessionId: string, text: string) =>
-  request<{ answer: string; citations: unknown[] }>(
+  request<{ session_id: string; answer: string; confidence: number; citations: unknown[]; disclaimer: string }>(
     `/voice/session/${sessionId}/turn`,
-    { method: 'POST', body: JSON.stringify({ text }) },
+    { method: 'POST', body: JSON.stringify({ utterance: text }) },
   );
 
 export const endVoiceSession = (sessionId: string) =>
-  request<VoiceSession>(`/voice/session/${sessionId}/end`, { method: 'POST' });
+  request<{ session_id: string; status: string; summary?: string }>(
+    `/voice/session/${sessionId}/end`,
+    { method: 'POST', body: JSON.stringify({}) },
+  );

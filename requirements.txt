@@ -29,3 +29,10 @@ PyJWT==2.8.0
 # Utilities
 python-dotenv==1.0.1
 python-multipart==0.0.9
+
+# LiveKit voice agent
+livekit-agents
+livekit-plugins-silero
+livekit-plugins-google
+livekit-plugins-elevenlabs
+livekit-plugins-deepgram

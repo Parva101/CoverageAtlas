@@ -5,3 +5,7 @@ data/
 __pycache__/
 *.pyc
 insurance_policies/
+.venv/
+.pytest_cache/
+backend/.env
+backend/.env.local

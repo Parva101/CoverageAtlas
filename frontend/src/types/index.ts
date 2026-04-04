@@ -115,5 +115,3 @@ export interface VoiceMessage {
   timestamp: string;
 }
 
-// App-level
-export type AppMode = 'professional' | 'patient';

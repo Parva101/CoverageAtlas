@@ -1,38 +1,18 @@
 import { NavLink, Outlet } from 'react-router-dom';
 import {
-  Search,
-  GitCompareArrows,
-  History,
-  Upload,
-  Radar,
   MessageCircle,
+  GitCompareArrows,
   Phone,
   Heart,
-  Shield,
 } from 'lucide-react';
-import type { AppMode } from '../types';
 
-const proNav = [
-  { to: '/pro/query', label: 'Query', icon: Search },
-  { to: '/pro/compare', label: 'Compare', icon: GitCompareArrows },
-  { to: '/pro/changes', label: 'Changes', icon: History },
-  { to: '/pro/upload', label: 'Upload', icon: Upload },
-  { to: '/pro/sources', label: 'Sources', icon: Radar },
+const nav = [
+  { to: '/ask', label: 'Ask', icon: MessageCircle },
+  { to: '/compare', label: 'Compare Plans', icon: GitCompareArrows },
+  { to: '/voice', label: 'Voice', icon: Phone },
 ];
 
-const patientNav = [
-  { to: '/patient/ask', label: 'Ask', icon: MessageCircle },
-  { to: '/patient/voice', label: 'Voice', icon: Phone },
-];
-
-interface Props {
-  mode: AppMode;
-  onModeChange: (m: AppMode) => void;
-}
-
-export default function Layout({ mode, onModeChange }: Props) {
-  const nav = mode === 'professional' ? proNav : patientNav;
-
+export default function Layout() {
   return (
     <div className="min-h-screen flex">
       {/* Sidebar */}
@@ -41,47 +21,19 @@ export default function Layout({ mode, onModeChange }: Props) {
         <div className="p-5 border-b border-slate-200">
           <div className="flex items-center gap-2.5">
             <div className="w-9 h-9 rounded-lg bg-blue-600 flex items-center justify-center">
-              <Shield className="w-5 h-5 text-white" />
+              <Heart className="w-5 h-5 text-white" />
             </div>
             <div>
               <h1 className="text-base font-semibold text-slate-900 leading-tight">
                 CoverageAtlas
               </h1>
-              <p className="text-xs text-slate-500">Policy Intelligence</p>
+              <p className="text-xs text-slate-500">Your Coverage Guide</p>
             </div>
           </div>
         </div>
 
-        {/* Mode Switcher */}
-        <div className="p-3">
-          <div className="flex bg-slate-100 rounded-lg p-0.5">
-            <button
-              onClick={() => onModeChange('professional')}
-              className={`flex-1 flex items-center justify-center gap-1.5 text-xs font-medium py-2 rounded-md transition-colors ${
-                mode === 'professional'
-                  ? 'bg-white text-slate-900 shadow-sm'
-                  : 'text-slate-500 hover:text-slate-700'
-              }`}
-            >
-              <Shield className="w-3.5 h-3.5" />
-              Professional
-            </button>
-            <button
-              onClick={() => onModeChange('patient')}
-              className={`flex-1 flex items-center justify-center gap-1.5 text-xs font-medium py-2 rounded-md transition-colors ${
-                mode === 'patient'
-                  ? 'bg-white text-slate-900 shadow-sm'
-                  : 'text-slate-500 hover:text-slate-700'
-              }`}
-            >
-              <Heart className="w-3.5 h-3.5" />
-              Patient
-            </button>
-          </div>
-        </div>
-
         {/* Navigation */}
-        <nav className="flex-1 px-3 py-2 space-y-0.5">
+        <nav className="flex-1 px-3 py-4 space-y-1">
           {nav.map(({ to, label, icon: Icon }) => (
             <NavLink
               key={to}
@@ -103,7 +55,7 @@ export default function Layout({ mode, onModeChange }: Props) {
         {/* Footer */}
         <div className="p-4 border-t border-slate-200">
           <p className="text-xs text-slate-400 leading-relaxed">
-            Informational only. Not medical or legal advice.
+            Informational only. Not medical or legal advice. Always confirm with your insurer.
           </p>
         </div>
       </aside>

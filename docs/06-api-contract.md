@@ -186,6 +186,8 @@ Finalize summary and store transcript.
 ```
 
 ## 9) Security (MVP)
-- Auth: JWT/session for web users.
-- Admin-only endpoints: upload, source scan config.
+- Auth: Bearer JWT (Auth0) for user APIs.
+- Admin-only endpoints: upload, source scan config/status.
+- `GET /auth/me` returns parsed claims for auth debugging.
+- If `AUTH0_ENABLED=false`, backend runs in local-dev auth bypass mode.
 - Rate limit query endpoints.

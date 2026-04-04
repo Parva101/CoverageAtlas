@@ -1,4 +1,4 @@
-// ── API Request / Response types matching 06-api-contract.md ──
+// API request/response types matching docs/06-api-contract.md
 
 export type CoverageStatus = 'covered' | 'restricted' | 'not_covered' | 'unknown';
 export type PayerType = 'commercial' | 'medicare' | 'medicaid' | 'other';
@@ -7,9 +7,9 @@ export type ChangeType = 'added' | 'removed' | 'modified';
 export type Channel = 'web' | 'voice';
 
 export interface Citation {
-  document_id: string;
-  page: number;
-  section: string;
+  document_id: string | null;
+  page: number | null;
+  section: string | null;
   snippet: string;
 }
 
@@ -20,6 +20,9 @@ export interface QueryRequest {
     payer_ids?: string[];
     plan_ids?: string[];
     policy_categories?: PolicyCategory[];
+    version_labels?: string[];
+    coverage_statuses?: CoverageStatus[];
+    policy_version_ids?: string[];
     effective_on?: string;
   };
   retrieval?: {
@@ -35,6 +38,15 @@ export interface QueryResponse {
   retrieval_trace: {
     chunks_used: number;
     vector_store: string;
+    applied_filters?: {
+      plan_ids?: string[];
+      payer_ids?: string[];
+      policy_categories?: string[];
+      version_labels?: string[];
+      coverage_statuses?: string[];
+      policy_version_ids_count?: number;
+      effective_on?: string | null;
+    };
   };
   disclaimer: string;
 }
@@ -42,24 +54,17 @@ export interface QueryResponse {
 // POST /compare
 export interface CompareRequest {
   drug_name: string;
-  plan_ids?: string[];
+  plan_ids: string[];
   effective_on?: string;
 }
 
 export interface CompareRow {
-  payer_id: string;
-  payer_name: string;
-  policy_title: string;
-  version_label: string;
-  effective_date: string;
+  plan_id: string;
   coverage_status: CoverageStatus;
   prior_auth_required: boolean | null;
   step_therapy_required: boolean | null;
-  quantity_limit_text: string | null;
-  site_of_care_text: string | null;
   criteria_summary: string[];
   citations: Citation[];
-  extraction_confidence: number;
 }
 
 export interface CompareResponse {
@@ -83,15 +88,40 @@ export interface PolicyChange {
   to_version?: string;
 }
 
+// GET /metadata/plans
+export interface MetadataPayer {
+  payer_id: string;
+  name: string;
+  payer_type: PayerType;
+  region: string | null;
+}
+
+export interface MetadataPlan {
+  plan_id: string;
+  payer_id: string;
+  payer_name: string;
+  plan_name: string;
+  plan_type: string | null;
+  market: string | null;
+  is_virtual?: boolean;
+}
+
+export interface PlanMetadataResponse {
+  payers: MetadataPayer[];
+  plans: MetadataPlan[];
+}
+
 // POST /documents/upload
 export interface DocumentStatus {
-  id: string;
-  file_name: string;
-  file_type: string;
+  id?: string;
+  document_id?: string;
+  file_name?: string;
+  file_type?: string;
   ingestion_status: 'queued' | 'processing' | 'completed' | 'failed';
-  ingestion_error: string | null;
-  ingested_at: string | null;
-  created_at: string;
+  ingestion_error?: string | null;
+  ingested_at?: string | null;
+  created_at?: string;
+  current_step?: string;
 }
 
 // Voice session

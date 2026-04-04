@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   GitCompareArrows,
   Loader2,
@@ -10,51 +10,16 @@ import {
   ArrowRight,
   FileText,
 } from 'lucide-react';
-import { postQuery } from '../../api/client';
-import type { QueryResponse } from '../../types';
+import { getPlanMetadata, postCompare } from '../../api/client';
+import type { CompareRow, CoverageStatus, MetadataPlan } from '../../types';
 
-const PAYERS = [
-  'UnitedHealthcare',
-  'Aetna',
-  'Cigna',
-  'Humana',
-  'BCBS Massachusetts',
-  'CareFirst BCBS',
-  'Excellus BCBS',
-  'BCBS Michigan',
-  'BCBS Texas',
-  'Horizon BCBS NJ',
-  'Medicare',
-  'Medicaid',
-];
-
-// Derive a simple coverage level from the answer text + confidence
 type CoverageLevel = 'covered' | 'restricted' | 'not_covered' | 'unclear';
-
-function inferCoverage(confidence: number, answer: string): CoverageLevel {
-  const l = answer.toLowerCase();
-  if (confidence < 0.35 || l.includes('insufficient evidence') || l.includes('not enough'))
-    return 'unclear';
-  if (l.includes('not covered') || l.includes('excluded') || l.includes('does not cover'))
-    return 'not_covered';
-  if (
-    l.includes('restricted') ||
-    l.includes('prior auth') ||
-    l.includes('step therapy') ||
-    l.includes('conditions') ||
-    l.includes('requires')
-  )
-    return 'restricted';
-  if (l.includes('covered') || l.includes('covers') || l.includes('approved'))
-    return 'covered';
-  return 'unclear';
-}
 
 const LEVEL_SCORE: Record<CoverageLevel, number> = {
   covered: 3,
   restricted: 2,
-  not_covered: 0,
   unclear: 1,
+  not_covered: 0,
 };
 
 const LEVEL_CONFIG: Record<
@@ -92,11 +57,51 @@ const LEVEL_CONFIG: Record<
 };
 
 interface PlanResult {
-  payer: string;
+  plan: MetadataPlan;
+  row: CompareRow;
   level: CoverageLevel;
-  answer: string;
-  confidence: number;
-  citations: QueryResponse['citations'];
+  summary: string;
+}
+
+function statusToLevel(status: CoverageStatus): CoverageLevel {
+  if (status === 'covered') return 'covered';
+  if (status === 'restricted') return 'restricted';
+  if (status === 'not_covered') return 'not_covered';
+  return 'unclear';
+}
+
+function statusText(status: CoverageStatus): string {
+  if (status === 'covered') return 'Policy indicates this medication is covered.';
+  if (status === 'restricted') return 'Policy indicates coverage with restrictions.';
+  if (status === 'not_covered') return 'Policy indicates this medication is not covered.';
+  return 'Coverage is not clearly stated in the available policy evidence.';
+}
+
+function rowSummary(row: CompareRow): string {
+  const parts: string[] = [statusText(row.coverage_status)];
+
+  if (row.prior_auth_required === true) parts.push('Prior authorization is required.');
+  if (row.prior_auth_required === false) parts.push('No prior authorization requirement was found.');
+
+  if (row.step_therapy_required === true) parts.push('Step therapy is required.');
+  if (row.step_therapy_required === false) parts.push('No step therapy requirement was found.');
+
+  if (row.criteria_summary.length > 0) {
+    parts.push(row.criteria_summary.slice(0, 2).join(' '));
+  }
+
+  return parts.join(' ');
+}
+
+function emptyRow(planId: string): CompareRow {
+  return {
+    plan_id: planId,
+    coverage_status: 'unknown',
+    prior_auth_required: null,
+    step_therapy_required: null,
+    criteria_summary: [],
+    citations: [],
+  };
 }
 
 function ResultCard({
@@ -108,12 +113,10 @@ function ResultCard({
 }) {
   const cfg = LEVEL_CONFIG[result.level];
   const Icon = cfg.icon;
+  const citation = result.row.citations[0];
 
   return (
-    <div
-      className={`rounded-xl border-2 ${cfg.border} ${cfg.bg} p-5 flex-1 space-y-3`}
-    >
-      {/* Tag */}
+    <div className={`rounded-xl border-2 ${cfg.border} ${cfg.bg} p-5 flex-1 space-y-3`}>
       <div className="flex items-center gap-2 flex-wrap">
         {tag === 'yours' && (
           <span className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded text-xs font-semibold">
@@ -125,10 +128,11 @@ function ResultCard({
             <Trophy className="w-3 h-3" /> Best Coverage
           </span>
         )}
-        <h3 className="text-base font-semibold text-slate-900">{result.payer}</h3>
+        <h3 className="text-base font-semibold text-slate-900">{result.plan.plan_name}</h3>
       </div>
 
-      {/* Status badge */}
+      <p className="text-xs text-slate-500">{result.plan.payer_name}</p>
+
       <span
         className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold ${cfg.bg} ${cfg.text} border ${cfg.border}`}
       >
@@ -136,152 +140,166 @@ function ResultCard({
         {cfg.label}
       </span>
 
-      {/* Answer */}
-      <p className="text-sm text-slate-700 leading-relaxed">{result.answer}</p>
+      <p className="text-sm text-slate-700 leading-relaxed">{result.summary}</p>
 
-      {/* Top citation */}
-      {result.citations.length > 0 && (
+      {citation && (
         <div className="border-t border-slate-200 pt-3">
           <div className="flex items-start gap-2">
             <FileText className="w-3.5 h-3.5 text-slate-400 mt-0.5 shrink-0" />
             <p className="text-xs text-slate-500 leading-relaxed italic">
-              "{result.citations[0].snippet}"
-              <span className="not-italic ml-1 text-slate-400">
-                — {result.citations[0].section}, p.{result.citations[0].page}
-              </span>
+              &quot;{citation.snippet}&quot;
+              {(citation.section || citation.page) && (
+                <span className="not-italic ml-1 text-slate-400">
+                  {citation.section || 'Policy'}
+                  {citation.page ? `, p.${citation.page}` : ''}
+                </span>
+              )}
             </p>
           </div>
         </div>
       )}
-
-      {/* Confidence */}
-      <p className="text-xs text-slate-400">
-        Confidence:{' '}
-        <span
-          className={
-            result.confidence >= 0.7
-              ? 'text-emerald-600 font-medium'
-              : result.confidence >= 0.5
-              ? 'text-amber-600 font-medium'
-              : 'text-red-500 font-medium'
-          }
-        >
-          {Math.round(result.confidence * 100)}%
-        </span>
-      </p>
     </div>
   );
 }
 
 export default function ComparePlans() {
+  const [plans, setPlans] = useState<MetadataPlan[]>([]);
+  const [loadingPlans, setLoadingPlans] = useState(true);
+  const [metadataError, setMetadataError] = useState('');
+
   const [drugName, setDrugName] = useState('');
-  const [myPayer, setMyPayer] = useState('');
+  const [myPlanId, setMyPlanId] = useState('');
   const [loading, setLoading] = useState(false);
   const [myResult, setMyResult] = useState<PlanResult | null>(null);
   const [bestResult, setBestResult] = useState<PlanResult | null>(null);
   const [error, setError] = useState('');
 
+  useEffect(() => {
+    let mounted = true;
+    const loadMetadata = async () => {
+      setLoadingPlans(true);
+      setMetadataError('');
+      try {
+        const metadata = await getPlanMetadata();
+        if (!mounted) return;
+        setPlans(metadata.plans);
+      } catch {
+        if (!mounted) return;
+        setPlans([]);
+        setMetadataError('Unable to load plans right now.');
+      } finally {
+        if (mounted) setLoadingPlans(false);
+      }
+    };
+
+    loadMetadata();
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const planById = useMemo(() => {
+    const byId = new Map<string, MetadataPlan>();
+    plans.forEach(plan => byId.set(plan.plan_id, plan));
+    return byId;
+  }, [plans]);
+
   const handleCompare = async () => {
-    if (!drugName.trim() || !myPayer) return;
+    if (!drugName.trim() || !myPlanId) return;
     setLoading(true);
     setError('');
     setMyResult(null);
     setBestResult(null);
 
-    const question = `Does ${myPayer} cover ${drugName}? What are the requirements?`;
-
     try {
-      // Query 1: user's payer
-      const myRes = await postQuery({
-        question,
-        filters: { payer_ids: [myPayer] },
-        retrieval: { top_k: 6 },
+      const planIds = [myPlanId, ...plans.filter(p => p.plan_id !== myPlanId).map(p => p.plan_id)];
+      const response = await postCompare({
+        drug_name: drugName.trim(),
+        plan_ids: planIds,
       });
-      const myLevel = inferCoverage(myRes.confidence, myRes.answer);
-      setMyResult({ payer: myPayer, level: myLevel, answer: myRes.answer, confidence: myRes.confidence, citations: myRes.citations });
 
-      // Query 2: all other payers in parallel — pick the best scoring one
-      const otherPayers = PAYERS.filter(p => p !== myPayer);
-      const results = await Promise.allSettled(
-        otherPayers.map(p =>
-          postQuery({
-            question: `Does ${p} cover ${drugName}? What are the requirements?`,
-            filters: { payer_ids: [p] },
-            retrieval: { top_k: 6 },
-          }).then(res => ({ payer: p, res })),
-        ),
-      );
+      const rowsByPlan = new Map<string, CompareRow>();
+      response.rows.forEach(row => rowsByPlan.set(row.plan_id, row));
 
-      const scored: PlanResult[] = results
-        .filter((r): r is PromiseFulfilledResult<{ payer: string; res: QueryResponse }> => r.status === 'fulfilled')
-        .map(r => ({
-          payer: r.value.payer,
-          level: inferCoverage(r.value.res.confidence, r.value.res.answer),
-          answer: r.value.res.answer,
-          confidence: r.value.res.confidence,
-          citations: r.value.res.citations,
-        }))
-        .filter(r => r.level !== 'unclear')
+      const buildResult = (plan: MetadataPlan): PlanResult => {
+        const row = rowsByPlan.get(plan.plan_id) || emptyRow(plan.plan_id);
+        return {
+          plan,
+          row,
+          level: statusToLevel(row.coverage_status),
+          summary: rowSummary(row),
+        };
+      };
+
+      const myPlan = planById.get(myPlanId);
+      if (!myPlan) {
+        throw new Error('Selected plan is no longer available. Please choose again.');
+      }
+
+      const mine = buildResult(myPlan);
+      const others = plans
+        .filter(plan => plan.plan_id !== myPlanId)
+        .map(buildResult)
         .sort((a, b) => {
-          const scoreDiff = LEVEL_SCORE[b.level] - LEVEL_SCORE[a.level];
-          if (scoreDiff !== 0) return scoreDiff;
-          return b.confidence - a.confidence;
+          const scoreDelta = LEVEL_SCORE[b.level] - LEVEL_SCORE[a.level];
+          if (scoreDelta !== 0) return scoreDelta;
+          return b.row.criteria_summary.length - a.row.criteria_summary.length;
         });
 
-      if (scored.length > 0) setBestResult(scored[0]);
-    } catch (e: any) {
-      setError(e.message || 'Something went wrong. Please try again.');
+      const best = others.find(candidate => candidate.level !== 'unclear') || null;
+
+      setMyResult(mine);
+      setBestResult(best);
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : 'Something went wrong. Please try again.';
+      setError(message);
     } finally {
       setLoading(false);
     }
   };
 
-  const isSamePlan = myResult && bestResult && myResult.payer === bestResult.payer;
+  const isSamePlan = myResult && bestResult && myResult.plan.plan_id === bestResult.plan.plan_id;
   const myIsBest =
     myResult &&
     bestResult &&
     LEVEL_SCORE[myResult.level] >= LEVEL_SCORE[bestResult.level] &&
-    myResult.confidence >= bestResult.confidence;
+    myResult.row.criteria_summary.length >= bestResult.row.criteria_summary.length;
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-blue-50/50 to-white">
       <div className="max-w-4xl mx-auto px-5 py-10 space-y-8">
-        {/* Header */}
         <div className="text-center">
           <div className="w-14 h-14 rounded-2xl bg-blue-100 flex items-center justify-center mx-auto mb-4">
             <GitCompareArrows className="w-7 h-7 text-blue-600" />
           </div>
           <h1 className="text-2xl font-semibold text-slate-900">Compare Your Plan</h1>
           <p className="text-slate-500 mt-2 text-sm leading-relaxed max-w-lg mx-auto">
-            See how your insurance compares to the best available coverage for a
-            specific medication.
+            Compare your selected plan with other plans using normalized backend policy data.
           </p>
         </div>
 
-        {/* Inputs */}
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 space-y-4">
           <div>
-            <label className="text-sm font-medium text-slate-700 mb-2 block">
-              Your insurance plan
-            </label>
+            <label className="text-sm font-medium text-slate-700 mb-2 block">Your insurance plan</label>
             <select
-              value={myPayer}
-              onChange={e => setMyPayer(e.target.value)}
+              value={myPlanId}
+              onChange={e => setMyPlanId(e.target.value)}
               className="w-full px-4 py-3 border border-slate-200 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              disabled={loadingPlans || plans.length === 0}
             >
               <option value="">Select your plan...</option>
-              {PAYERS.map(p => (
-                <option key={p} value={p}>
-                  {p}
+              {plans.map(plan => (
+                <option key={plan.plan_id} value={plan.plan_id}>
+                  {plan.plan_name} - {plan.payer_name}
                 </option>
               ))}
             </select>
+            {loadingPlans && <p className="mt-2 text-xs text-slate-400">Loading plans...</p>}
+            {metadataError && <p className="mt-2 text-xs text-amber-600">{metadataError}</p>}
           </div>
 
           <div>
-            <label className="text-sm font-medium text-slate-700 mb-2 block">
-              Medication name
-            </label>
+            <label className="text-sm font-medium text-slate-700 mb-2 block">Medication name</label>
             <input
               type="text"
               value={drugName}
@@ -294,43 +312,41 @@ export default function ComparePlans() {
 
           <button
             onClick={handleCompare}
-            disabled={loading || !drugName.trim() || !myPayer}
+            disabled={loading || !drugName.trim() || !myPlanId}
             className="w-full py-3 bg-blue-600 text-white text-sm font-medium rounded-xl hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
           >
-            {loading ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
-            ) : (
-              <GitCompareArrows className="w-4 h-4" />
-            )}
-            {loading ? 'Checking all plans...' : 'Compare Plans'}
+            {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <GitCompareArrows className="w-4 h-4" />}
+            {loading ? 'Comparing plans...' : 'Compare Plans'}
           </button>
         </div>
 
-        {/* Error */}
         {error && (
           <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-center">
             <p className="text-sm text-red-700">{error}</p>
           </div>
         )}
 
-        {/* Loading */}
-        {loading && (
-          <div className="text-center py-8">
-            <Loader2 className="w-8 h-8 text-blue-500 animate-spin mx-auto mb-3" />
-            <p className="text-sm text-slate-500">
-              Checking coverage across all plans — this takes a few seconds...
+        {!loading && plans.length === 0 && !metadataError && (
+          <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-center">
+            <p className="text-sm text-amber-700">
+              No plans are available yet. Add plan records in the backend DB to enable structured comparisons.
             </p>
           </div>
         )}
 
-        {/* Your plan is already best */}
+        {loading && (
+          <div className="text-center py-8">
+            <Loader2 className="w-8 h-8 text-blue-500 animate-spin mx-auto mb-3" />
+            <p className="text-sm text-slate-500">Comparing coverage across plans...</p>
+          </div>
+        )}
+
         {!loading && myResult && (isSamePlan || myIsBest) && (
           <div className="bg-emerald-50 border-2 border-emerald-300 rounded-xl p-5 text-center">
             <Trophy className="w-8 h-8 text-emerald-500 mx-auto mb-2" />
-            <h3 className="text-lg font-semibold text-emerald-800">Great news!</h3>
+            <h3 className="text-lg font-semibold text-emerald-800">Great news</h3>
             <p className="text-sm text-emerald-700 mt-1">
-              Your plan (<strong>{myPayer}</strong>) already has the best
-              coverage we found for <strong>{drugName}</strong>.
+              Your selected plan already appears to be the strongest match we found for <strong>{drugName}</strong>.
             </p>
             <div className="mt-4">
               <ResultCard result={myResult} tag="yours" />
@@ -338,12 +354,20 @@ export default function ComparePlans() {
           </div>
         )}
 
-        {/* Side-by-side comparison */}
+        {!loading && myResult && !bestResult && (
+          <div className="space-y-4">
+            <ResultCard result={myResult} tag="yours" />
+            <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 text-center">
+              <p className="text-xs text-slate-500">
+                We could not find a clearly stronger alternative plan for this medication.
+              </p>
+            </div>
+          </div>
+        )}
+
         {!loading && myResult && bestResult && !isSamePlan && !myIsBest && (
           <div className="space-y-4">
-            <h2 className="text-lg font-semibold text-slate-900">
-              {drugName} — Your Plan vs. Best Available
-            </h2>
+            <h2 className="text-lg font-semibold text-slate-900">{drugName} - Your Plan vs. Best Available</h2>
 
             <div className="flex gap-4 items-stretch">
               <ResultCard result={myResult} tag="yours" />
@@ -353,64 +377,28 @@ export default function ComparePlans() {
               <ResultCard result={bestResult} tag="best" />
             </div>
 
-            {/* Plain-language summary */}
             <div className="bg-blue-50 border border-blue-200 rounded-xl p-5 space-y-2">
-              <h3 className="text-sm font-semibold text-blue-900">
-                What this means for you
-              </h3>
+              <h3 className="text-sm font-semibold text-blue-900">What this means for you</h3>
               <ul className="space-y-1.5 text-sm text-blue-800">
-                {LEVEL_SCORE[bestResult.level] > LEVEL_SCORE[myResult.level] && (
-                  <li className="flex items-start gap-2">
-                    <span className="shrink-0">•</span>
-                    <span>
-                      <strong>{bestResult.payer}</strong> offers better base
-                      coverage ({bestResult.level.replace('_', ' ')} vs.{' '}
-                      {myResult.level.replace('_', ' ')}).
-                    </span>
-                  </li>
-                )}
-                {bestResult.confidence > myResult.confidence + 0.1 && (
-                  <li className="flex items-start gap-2">
-                    <span className="shrink-0">•</span>
-                    <span>
-                      We're more confident about{' '}
-                      <strong>{bestResult.payer}</strong>'s policy (
-                      {Math.round(bestResult.confidence * 100)}% vs.{' '}
-                      {Math.round(myResult.confidence * 100)}%).
-                    </span>
-                  </li>
-                )}
                 <li className="flex items-start gap-2">
-                  <span className="shrink-0">•</span>
+                  <span className="shrink-0">*</span>
                   <span>
-                    This comparison is based on published policy documents.
-                    Contact your insurer to confirm your specific benefits.
+                    <strong>{bestResult.plan.plan_name}</strong> currently looks stronger for <strong>{drugName}</strong> based on available policy evidence.
                   </span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <span className="shrink-0">*</span>
+                  <span>Use this as a starting point only and confirm details with your insurer.</span>
                 </li>
               </ul>
             </div>
           </div>
         )}
 
-        {/* Only your plan result, no best found */}
-        {!loading && myResult && !bestResult && !myIsBest && (
-          <div className="space-y-4">
-            <ResultCard result={myResult} tag="yours" />
-            <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 text-center">
-              <p className="text-xs text-slate-500">
-                We couldn't find clearer coverage data at other plans to compare against.
-              </p>
-            </div>
-          </div>
-        )}
-
-        {/* Disclaimer */}
         {!loading && myResult && (
           <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-center">
             <p className="text-xs text-amber-700 leading-relaxed">
-              Informational only. Based on published policy documents — not a
-              guarantee of coverage or a recommendation to switch plans. Always
-              confirm with your insurance company.
+              Informational only. Based on published policy documents; not a guarantee of coverage or a recommendation to switch plans.
             </p>
           </div>
         )}
@@ -418,3 +406,5 @@ export default function ComparePlans() {
     </div>
   );
 }
+
+

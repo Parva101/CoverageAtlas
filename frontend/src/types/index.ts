@@ -1,0 +1,110 @@
+// ── API Request / Response types matching 06-api-contract.md ──
+
+export type CoverageStatus = 'covered' | 'restricted' | 'not_covered' | 'unknown';
+export type PayerType = 'commercial' | 'medicare' | 'medicaid' | 'other';
+export type PolicyCategory = 'medical_benefit' | 'pharmacy_benefit' | 'general_um';
+export type ChangeType = 'added' | 'removed' | 'modified';
+export type Channel = 'web' | 'voice';
+
+export interface Citation {
+  document_id: string;
+  page: number;
+  section: string;
+  snippet: string;
+}
+
+// POST /query
+export interface QueryRequest {
+  question: string;
+  filters?: {
+    payer_ids?: string[];
+    plan_ids?: string[];
+    policy_categories?: PolicyCategory[];
+    effective_on?: string;
+  };
+  retrieval?: {
+    top_k?: number;
+    hybrid?: boolean;
+  };
+}
+
+export interface QueryResponse {
+  answer: string;
+  confidence: number;
+  citations: Citation[];
+  retrieval_trace: {
+    chunks_used: number;
+    vector_store: string;
+  };
+  disclaimer: string;
+}
+
+// POST /compare
+export interface CompareRequest {
+  drug_name: string;
+  plan_ids?: string[];
+  effective_on?: string;
+}
+
+export interface CompareRow {
+  payer_id: string;
+  payer_name: string;
+  policy_title: string;
+  version_label: string;
+  effective_date: string;
+  coverage_status: CoverageStatus;
+  prior_auth_required: boolean | null;
+  step_therapy_required: boolean | null;
+  quantity_limit_text: string | null;
+  site_of_care_text: string | null;
+  criteria_summary: string[];
+  citations: Citation[];
+  extraction_confidence: number;
+}
+
+export interface CompareResponse {
+  drug_name: string;
+  rows: CompareRow[];
+}
+
+// GET /policies/{id}/changes
+export interface PolicyChange {
+  id: string;
+  policy_id: string;
+  from_version_id: string | null;
+  to_version_id: string;
+  change_type: ChangeType;
+  field_name: string;
+  old_value: string | null;
+  new_value: string | null;
+  citations: Citation[];
+  detected_at: string;
+  from_version?: string;
+  to_version?: string;
+}
+
+// POST /documents/upload
+export interface DocumentStatus {
+  id: string;
+  file_name: string;
+  file_type: string;
+  ingestion_status: 'queued' | 'processing' | 'completed' | 'failed';
+  ingestion_error: string | null;
+  ingested_at: string | null;
+  created_at: string;
+}
+
+// Voice session
+export interface VoiceSession {
+  id: string;
+  status: 'active' | 'ended';
+  messages: VoiceMessage[];
+  summary?: string;
+}
+
+export interface VoiceMessage {
+  role: 'user' | 'assistant';
+  text: string;
+  timestamp: string;
+}
+

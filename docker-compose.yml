@@ -1,0 +1,100 @@
+version: "3.9"
+
+# CoverageAtlas — full stack
+#
+#   frontend  → http://localhost:3000   (React via nginx)
+#   backend   → http://localhost:8000   (FastAPI)
+#   postgres  → localhost:5432
+#   qdrant    → http://10.157.92.242:6333/ (external endpoint used by backend)
+#   redis     → localhost:6379
+#
+# Quick start:
+#   1. cp .env.example .env   (fill in Vertex/Gemini AI settings)
+#   2. docker compose up --build
+#   3. Open http://localhost:3000
+
+services:
+
+  # ── Infrastructure ──────────────────────────────────────────────
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: coverageatlas_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB:       coverageatlas
+      POSTGRES_USER:     postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./schema.sql:/docker-entrypoint-initdb.d/schema.sql  # auto-run on first boot
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  qdrant:
+    image: qdrant/qdrant:v1.9.1
+    container_name: coverageatlas_qdrant
+    restart: unless-stopped
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    environment:
+      QDRANT__SERVICE__HTTP_PORT: 6333
+
+  redis:
+    image: redis:7-alpine
+    container_name: coverageatlas_redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --save 60 1 --loglevel warning
+
+  # ── Application ─────────────────────────────────────────────────
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: coverageatlas_backend
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/coverageatlas
+      QDRANT_URL:   http://10.157.92.242:6333/
+      REDIS_URL:    redis://redis:6379/0
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+      redis:
+        condition: service_started
+    volumes:
+      - ./data:/app/data          # uploaded policy docs persist here
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    container_name: coverageatlas_frontend
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+
+volumes:
+  postgres_data:
+  qdrant_data:
+  redis_data:

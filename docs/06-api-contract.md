@@ -53,6 +53,9 @@ Request:
     "payer_ids": ["uuid"],
     "plan_ids": ["uuid"],
     "policy_categories": ["medical_benefit"],
+    "version_labels": ["v2026-04-01"],
+    "coverage_statuses": ["restricted"],
+    "policy_version_ids": ["uuid"],
     "effective_on": "2026-04-01"
   },
   "retrieval": {
@@ -61,6 +64,12 @@ Request:
   }
 }
 ```
+
+Notes:
+- All `filters.*` fields are optional.
+- `plan_ids` are resolved to payer scope before retrieval.
+- `effective_on` applies policy-version date filtering (`effective_date <= effective_on`).
+- `policy_version_ids` can be used as an explicit allowlist for retrieval.
 
 Response:
 ```json
@@ -177,6 +186,6 @@ Finalize summary and store transcript.
 ```
 
 ## 9) Security (MVP)
-- Auth: JWT/session for web users.
+- Auth: bearer JWT for protected admin endpoints.
 - Admin-only endpoints: upload, source scan config.
 - Rate limit query endpoints.

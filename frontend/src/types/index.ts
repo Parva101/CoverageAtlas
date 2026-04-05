@@ -111,6 +111,46 @@ export interface PlanMetadataResponse {
   plans: MetadataPlan[];
 }
 
+export interface PolicyVersionMetadata {
+  version_id: string;
+  version_label: string | null;
+  effective_date: string | null;
+  published_date: string | null;
+  is_current: boolean;
+}
+
+export interface PolicyMetadata {
+  policy_id: string;
+  payer_id: string;
+  payer_name: string;
+  policy_title: string;
+  policy_category: PolicyCategory | null;
+  versions: PolicyVersionMetadata[];
+}
+
+export interface PoliciesMetadataResponse {
+  policies: PolicyMetadata[];
+}
+
+export interface PolicyChangeTimelineItem {
+  id: string;
+  policy_id: string;
+  payer_name: string | null;
+  policy_title: string | null;
+  from_version: string | null;
+  to_version: string | null;
+  change_type: ChangeType;
+  field_name: string;
+  old_value: string | null;
+  new_value: string | null;
+  citations: Citation[];
+  detected_at: string | null;
+}
+
+export interface RecentPolicyChangesResponse {
+  changes: PolicyChangeTimelineItem[];
+}
+
 // POST /documents/upload
 export interface DocumentStatus {
   id?: string;
@@ -136,5 +176,42 @@ export interface VoiceMessage {
   role: 'user' | 'assistant';
   text: string;
   timestamp: string;
+}
+
+export interface UserProfile {
+  user_id: string;
+  full_name: string | null;
+  email: string | null;
+  phone: string | null;
+  date_of_birth: string | null;
+  state: string | null;
+  member_id: string | null;
+  preferred_language: string | null;
+  preferred_channel: 'web' | 'voice' | 'email' | null;
+  primary_plan_id: string | null;
+  chronic_conditions: string[];
+  medications: string[];
+  notes: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
+export interface UserProfileResponse {
+  profile: UserProfile;
+}
+
+export interface UserProfileUpdateRequest {
+  full_name?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  date_of_birth?: string | null;
+  state?: string | null;
+  member_id?: string | null;
+  preferred_language?: string | null;
+  preferred_channel?: 'web' | 'voice' | 'email' | null;
+  primary_plan_id?: string | null;
+  chronic_conditions?: string[];
+  medications?: string[];
+  notes?: string | null;
 }
 

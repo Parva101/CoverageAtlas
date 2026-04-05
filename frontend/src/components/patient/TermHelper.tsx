@@ -1,71 +1,94 @@
-import { useState } from 'react';
-import { BookOpen, ChevronDown } from 'lucide-react';
+import { useMemo, useState } from 'react';
+import { BookOpen, ChevronDown, Search } from 'lucide-react';
 
 const TERMS = [
   {
     term: 'Prior Authorization',
-    definition: 'Pre-approval your doctor gets from your insurance before you can receive a treatment or medication.',
+    definition: 'Pre-approval your doctor gets from your insurer before a treatment or medication is covered.',
   },
   {
     term: 'Step Therapy',
-    definition: 'A requirement to try a less expensive medication first before your insurance will cover the one your doctor prescribed.',
+    definition: 'A requirement to try lower-cost options first before the prescribed treatment is approved.',
   },
   {
     term: 'Formulary',
-    definition: 'The list of drugs your insurance plan covers. Drugs not on the list may cost more or not be covered.',
+    definition: 'The drug list your plan covers. Non-formulary medications may cost more or be denied.',
   },
   {
     term: 'Coverage Status',
-    definition: '"Covered" means the plan pays for it. "Restricted" means it\'s covered with conditions. "Not covered" means you\'d pay out-of-pocket.',
+    definition: '"Covered" means likely payable, "Restricted" means conditional, and "Not covered" means likely denied.',
   },
   {
     term: 'Quantity Limit',
-    definition: 'A cap on how much medication your plan will cover in a given time period.',
+    definition: 'A cap on how much medication is covered within a given time period.',
   },
   {
     term: 'Site of Care',
-    definition: 'Where the treatment must be given (doctor\'s office, hospital outpatient, home infusion) for insurance to cover it.',
+    definition: 'Where treatment must happen for coverage (clinic, hospital outpatient, or home infusion).',
   },
   {
     term: 'Appeal',
-    definition: 'A formal request to your insurance to reconsider a denied claim. You have a legal right to appeal.',
+    definition: 'A formal request asking the insurer to reconsider a denial. Members are generally entitled to this process.',
   },
   {
-    term: 'Medical Benefit vs. Pharmacy Benefit',
-    definition: 'Some drugs are covered under your medical insurance (usually infusions) while others go through your pharmacy plan (usually pills/injectables).',
+    term: 'Medical Benefit vs Pharmacy Benefit',
+    definition: 'Some medications are billed under medical claims while others are processed through the pharmacy benefit.',
   },
 ];
 
 export default function TermHelper() {
   const [expanded, setExpanded] = useState(false);
+  const [query, setQuery] = useState('');
+
+  const filteredTerms = useMemo(() => {
+    const normalized = query.trim().toLowerCase();
+    if (!normalized) return TERMS;
+    return TERMS.filter(item => {
+      const term = item.term.toLowerCase();
+      const definition = item.definition.toLowerCase();
+      return term.includes(normalized) || definition.includes(normalized);
+    });
+  }, [query]);
 
   return (
-    <div className="bg-white rounded-xl border border-slate-200 p-5">
-      <button
-        onClick={() => setExpanded(!expanded)}
-        className="flex items-center justify-between w-full"
-      >
+    <section className="app-surface p-5">
+      <button onClick={() => setExpanded(prev => !prev)} className="flex w-full items-center justify-between">
         <div className="flex items-center gap-2">
-          <BookOpen className="w-5 h-5 text-violet-500" />
-          <h3 className="text-sm font-semibold text-slate-900">Insurance Terms Explained</h3>
+          <BookOpen className="h-5 w-5 text-cyan-600" />
+          <h3 className="text-sm font-semibold text-slate-900">Insurance terms explained</h3>
         </div>
-        <ChevronDown
-          className={`w-4 h-4 text-slate-400 transition-transform ${expanded ? 'rotate-180' : ''}`}
-        />
+        <ChevronDown className={`h-4 w-4 text-slate-500 transition-transform ${expanded ? 'rotate-180' : ''}`} />
       </button>
 
       {expanded && (
-        <div className="mt-4 space-y-3">
-          {TERMS.map(t => (
-            <div key={t.term} className="flex gap-3">
-              <span className="inline-block px-2.5 py-1 bg-violet-50 text-violet-700 rounded-lg text-xs font-semibold shrink-0 h-fit">
-                {t.term}
-              </span>
-              <p className="text-xs text-slate-600 leading-relaxed">{t.definition}</p>
+        <div className="animate-fade-up mt-4 space-y-3">
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+            <input
+              type="text"
+              value={query}
+              onChange={event => setQuery(event.target.value)}
+              placeholder="Search terms..."
+              className="app-input pl-9"
+            />
+          </div>
+
+          {filteredTerms.length === 0 && (
+            <p className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-500">
+              No glossary terms matched your search.
+            </p>
+          )}
+
+          {filteredTerms.map(item => (
+            <div key={item.term} className="rounded-xl border border-slate-200 bg-white p-3">
+              <p className="inline-flex rounded-lg bg-cyan-50 px-2 py-1 text-xs font-semibold text-cyan-700">
+                {item.term}
+              </p>
+              <p className="mt-2 text-sm leading-relaxed text-slate-600">{item.definition}</p>
             </div>
           ))}
         </div>
       )}
-    </div>
+    </section>
   );
 }

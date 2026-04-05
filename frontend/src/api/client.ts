@@ -4,6 +4,10 @@ import type {
   CompareRequest,
   CompareResponse,
   PolicyChange,
+  PoliciesMetadataResponse,
+  RecentPolicyChangesResponse,
+  UserProfileResponse,
+  UserProfileUpdateRequest,
   DocumentStatus,
   VoiceSession,
   PlanMetadataResponse,
@@ -72,6 +76,7 @@ export const getAuthMe = () =>
 
 // Metadata
 export const getPlanMetadata = () => request<PlanMetadataResponse>('/metadata/plans');
+export const getPolicyMetadata = () => request<PoliciesMetadataResponse>('/metadata/policies');
 
 // Query (Q&A)
 export const postQuery = (body: QueryRequest) =>
@@ -92,6 +97,18 @@ export const getPolicyChanges = (policyId: string, from: string, to: string) =>
   request<{ policy_id: string; from_version: string; to_version: string; changes: PolicyChange[] }>(
     `/policies/${policyId}/changes?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
   );
+export const getRecentPolicyChanges = (limit = 30, policyId?: string) => {
+  const policyFilter = policyId ? `&policy_id=${encodeURIComponent(policyId)}` : '';
+  return request<RecentPolicyChangesResponse>(`/policies/changes/recent?limit=${limit}${policyFilter}`);
+};
+
+// Profile
+export const getMyProfile = () => request<UserProfileResponse>('/profile/me');
+export const updateMyProfile = (body: UserProfileUpdateRequest) =>
+  request<UserProfileResponse>('/profile/me', {
+    method: 'PUT',
+    body: JSON.stringify(body),
+  });
 
 // Documents
 export const uploadDocument = async (

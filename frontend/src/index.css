@@ -1,15 +1,119 @@
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  --font-body: 'Plus Jakarta Sans', 'Segoe UI', sans-serif;
+  --font-heading: 'Space Grotesk', 'Plus Jakarta Sans', sans-serif;
+
+  --bg-main: #f8fafc;
+  --bg-elevated: #ffffff;
+  --bg-soft: #eef4ff;
+  --border-soft: #d8e2f2;
+
+  --text-main: #0f172a;
+  --text-muted: #475569;
+  --brand-500: #2563eb;
+  --brand-600: #1d4ed8;
+  --accent-500: #0f766e;
+  --warn-500: #b45309;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
 body {
   margin: 0;
-  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  min-height: 100vh;
+  font-family: var(--font-body);
+  color: var(--text-main);
   -webkit-font-smoothing: antialiased;
-  background: #f8fafc;
-  color: #0f172a;
+  background:
+    radial-gradient(circle at 8% 6%, rgb(37 99 235 / 14%), transparent 38%),
+    radial-gradient(circle at 92% 4%, rgb(15 118 110 / 12%), transparent 34%),
+    linear-gradient(180deg, #f1f5ff 0%, var(--bg-main) 22%, #f8fbff 100%);
+  background-attachment: fixed;
 }
 
 #root {
   min-height: 100vh;
+}
+
+@layer base {
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    font-family: var(--font-heading);
+    letter-spacing: -0.01em;
+  }
+
+  ::selection {
+    background: rgb(37 99 235 / 18%);
+    color: #0f172a;
+  }
+}
+
+@layer components {
+  .app-surface {
+    @apply rounded-2xl border border-slate-200/80 bg-white/85 shadow-[0_10px_35px_-20px_rgba(30,64,175,0.48)] backdrop-blur-md;
+  }
+
+  .app-input {
+    @apply w-full rounded-xl border border-slate-200 bg-white/95 px-4 py-3 text-sm text-slate-800 outline-none transition-all duration-200 placeholder:text-slate-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-100;
+  }
+
+  .app-button-primary {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-55;
+  }
+
+  .app-button-secondary {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-sm font-medium text-slate-700 transition hover:border-blue-200 hover:bg-blue-50/60;
+  }
+
+  .app-chip {
+    @apply rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 transition hover:border-blue-200 hover:bg-blue-50/50;
+  }
+
+  .app-chip-active {
+    @apply border-blue-200 bg-blue-50 text-blue-700;
+  }
+}
+
+@keyframes float-soft {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+
+  50% {
+    transform: translateY(-4px);
+  }
+}
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-float-soft {
+  animation: float-soft 4s ease-in-out infinite;
+}
+
+.animate-fade-up {
+  animation: fade-up 320ms ease-out both;
 }

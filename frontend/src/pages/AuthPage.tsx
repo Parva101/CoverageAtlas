@@ -1,8 +1,9 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { LockKeyhole, Shield, UserPlus } from 'lucide-react';
 import { useAuth0 } from '@auth0/auth0-react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { auth0Config, auth0ConfigError, hasAuth0CoreConfig, isAuth0Enabled } from '../auth/config';
+import { readAuth0ProfileBootstrap, saveSignupProfileBootstrap } from '../auth/profileBootstrap';
 
 interface AuthPageProps {
   mode: 'login' | 'signup';
@@ -34,6 +35,9 @@ function Auth0AuthPage({ mode }: AuthPageProps) {
   const { isAuthenticated, isLoading, loginWithRedirect, error } = useAuth0();
   const navigate = useNavigate();
   const location = useLocation();
+  const [signupFullName, setSignupFullName] = useState(() => readAuth0ProfileBootstrap()?.fullName || '');
+  const [signupPhone, setSignupPhone] = useState(() => readAuth0ProfileBootstrap()?.phone || '');
+  const [signupError, setSignupError] = useState('');
 
   const params = new URLSearchParams(location.search);
   const returnTo = params.get('returnTo') || '/ask';
@@ -47,6 +51,18 @@ function Auth0AuthPage({ mode }: AuthPageProps) {
   }, [isAuthenticated, isLoading, navigate, returnTo]);
 
   const startAuth = async (targetMode: 'login' | 'signup') => {
+    if (targetMode === 'signup') {
+      const fullName = signupFullName.trim().replace(/\s+/g, ' ');
+      const phone = signupPhone.trim();
+      if (!fullName || !phone) {
+        setSignupError('Please enter your full name and phone number to continue.');
+        return;
+      }
+      saveSignupProfileBootstrap({ fullName, phone });
+    } else {
+      setSignupError('');
+    }
+
     await loginWithRedirect({
       appState: { returnTo },
       authorizationParams: {
@@ -79,6 +95,38 @@ function Auth0AuthPage({ mode }: AuthPageProps) {
         </div>
 
         <div className="space-y-3">
+          {mode === 'signup' && (
+            <div className="space-y-3">
+              <div>
+                <label className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">
+                  Full Name
+                </label>
+                <input
+                  value={signupFullName}
+                  onChange={event => setSignupFullName(event.target.value)}
+                  className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm text-slate-800 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                  placeholder="Jane Doe"
+                  autoComplete="name"
+                />
+              </div>
+              <div>
+                <label className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">
+                  Phone Number
+                </label>
+                <input
+                  value={signupPhone}
+                  onChange={event => setSignupPhone(event.target.value)}
+                  className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm text-slate-800 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                  placeholder="+1 555 123 4567"
+                  autoComplete="tel"
+                />
+                <p className="mt-1 text-xs text-slate-500">
+                  We&apos;ll use this to pre-fill your profile after signup.
+                </p>
+              </div>
+            </div>
+          )}
+
           <button
             onClick={() => startAuth('login')}
             className={`w-full inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl text-sm font-semibold transition-colors ${
@@ -103,11 +151,11 @@ function Auth0AuthPage({ mode }: AuthPageProps) {
           </button>
         </div>
 
-        {(error || auth0Error || auth0ErrorDescription) && (
+        {(signupError || error || auth0Error || auth0ErrorDescription) && (
           <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2.5">
             <p className="text-xs font-semibold text-red-700">Authentication error</p>
             <p className="text-xs text-red-600 mt-1 leading-relaxed break-words">
-              {auth0ErrorDescription || auth0Error || error?.message || 'Unable to sign in right now.'}
+              {signupError || auth0ErrorDescription || auth0Error || error?.message || 'Unable to sign in right now.'}
             </p>
           </div>
         )}

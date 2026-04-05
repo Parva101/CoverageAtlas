@@ -5,14 +5,17 @@ import './index.css';
 import App from './App';
 import AppAuthProvider from './auth/AuthProvider';
 import AuthTokenBridge from './auth/AuthTokenBridge';
+import ThemeProvider from './theme/ThemeProvider';
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <BrowserRouter>
-      <AppAuthProvider>
-        <AuthTokenBridge />
-        <App />
-      </AppAuthProvider>
-    </BrowserRouter>
+    <ThemeProvider>
+      <BrowserRouter>
+        <AppAuthProvider>
+          <AuthTokenBridge />
+          <App />
+        </AppAuthProvider>
+      </BrowserRouter>
+    </ThemeProvider>
   </StrictMode>,
 );

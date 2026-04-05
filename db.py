@@ -12,6 +12,7 @@ import os
 import json
 import uuid
 import logging
+import threading
 from contextlib import contextmanager
 from datetime import datetime, date
 from typing import Any, Optional
@@ -25,6 +26,8 @@ DATABASE_URL = os.environ.get(
 )
 
 log = logging.getLogger(__name__)
+_USER_PROFILES_SCHEMA_READY = False
+_USER_PROFILES_SCHEMA_LOCK = threading.Lock()
 
 # ── Connection pool (simple, no external lib needed for hackathon) ──────────
 
@@ -465,27 +468,38 @@ def _coerce_text_list(value: Any) -> list[str]:
 
 
 def ensure_user_profiles_table(conn):
-    execute(conn, """
-        CREATE TABLE IF NOT EXISTS user_profiles (
-            user_id            TEXT        PRIMARY KEY,
-            full_name          TEXT,
-            email              TEXT,
-            phone              TEXT,
-            date_of_birth      DATE,
-            state              TEXT,
-            member_id          TEXT,
-            preferred_language TEXT,
-            preferred_channel  TEXT        CHECK (preferred_channel IN ('web','voice','email')),
-            primary_plan_id    TEXT,
-            chronic_conditions JSONB       NOT NULL DEFAULT '[]',
-            medications        JSONB       NOT NULL DEFAULT '[]',
-            notes              TEXT,
-            created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-            updated_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        )
-    """)
-    execute(conn, "CREATE INDEX IF NOT EXISTS idx_user_profiles_email ON user_profiles(email)")
-    execute(conn, "CREATE INDEX IF NOT EXISTS idx_user_profiles_plan ON user_profiles(primary_plan_id)")
+    global _USER_PROFILES_SCHEMA_READY
+    if _USER_PROFILES_SCHEMA_READY:
+        return
+
+    with _USER_PROFILES_SCHEMA_LOCK:
+        if _USER_PROFILES_SCHEMA_READY:
+            return
+
+        # Prevent concurrent DDL from multiple processes hitting this lazily on first request.
+        execute(conn, "SELECT pg_advisory_xact_lock(hashtext('coverageatlas_user_profiles_schema'))")
+        execute(conn, """
+            CREATE TABLE IF NOT EXISTS user_profiles (
+                user_id            TEXT        PRIMARY KEY,
+                full_name          TEXT,
+                email              TEXT,
+                phone              TEXT,
+                date_of_birth      DATE,
+                state              TEXT,
+                member_id          TEXT,
+                preferred_language TEXT,
+                preferred_channel  TEXT        CHECK (preferred_channel IN ('web','voice','email')),
+                primary_plan_id    TEXT,
+                chronic_conditions JSONB       NOT NULL DEFAULT '[]',
+                medications        JSONB       NOT NULL DEFAULT '[]',
+                notes              TEXT,
+                created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """)
+        execute(conn, "CREATE INDEX IF NOT EXISTS idx_user_profiles_email ON user_profiles(email)")
+        execute(conn, "CREATE INDEX IF NOT EXISTS idx_user_profiles_plan ON user_profiles(primary_plan_id)")
+        _USER_PROFILES_SCHEMA_READY = True
 
 
 def _normalize_profile_row(row: Optional[dict]) -> Optional[dict]:

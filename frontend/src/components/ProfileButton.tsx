@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronDown, LogOut } from 'lucide-react';
+import { ChevronDown, LogOut, UserRound } from 'lucide-react';
 import { useAuth0 } from '@auth0/auth0-react';
+import { Link } from 'react-router-dom';
 import { clearAuthToken } from '../api/client';
 import { hasAuth0CoreConfig, isAuth0Enabled } from '../auth/config';
 
@@ -61,12 +62,20 @@ function Auth0ProfileButton() {
             <p className="text-sm font-semibold text-slate-800 truncate">{displayName}</p>
             <p className="text-xs text-slate-500 truncate">{email}</p>
           </div>
+          <Link
+            to="/profile"
+            onClick={() => setOpen(false)}
+            className="w-full inline-flex items-center gap-2 px-3 py-2.5 text-sm text-slate-700 hover:bg-slate-50"
+          >
+            <UserRound className="w-4 h-4 text-slate-500" />
+            My profile
+          </Link>
           <button
             onClick={() => {
               clearAuthToken();
               logout({ logoutParams: { returnTo: window.location.origin } });
             }}
-            className="w-full inline-flex items-center gap-2 px-3 py-2.5 text-sm text-slate-700 hover:bg-slate-50 rounded-b-xl"
+            className="w-full inline-flex items-center gap-2 px-3 py-2.5 text-sm text-slate-700 hover:bg-slate-50 rounded-b-xl border-t border-slate-100"
           >
             <LogOut className="w-4 h-4 text-slate-500" />
             Log out
@@ -112,13 +121,21 @@ function LocalProfileButton() {
             <p className="text-sm font-semibold text-slate-800">Local bypass mode</p>
             <p className="text-xs text-slate-500">Auth0 is not enabled.</p>
           </div>
+          <Link
+            to="/profile"
+            onClick={() => setOpen(false)}
+            className="w-full inline-flex items-center gap-2 px-3 py-2.5 text-sm text-slate-700 hover:bg-slate-50"
+          >
+            <UserRound className="w-4 h-4 text-slate-500" />
+            My profile
+          </Link>
           <button
             onClick={() => {
               clearAuthToken();
               setOpen(false);
               window.location.reload();
             }}
-            className="w-full inline-flex items-center gap-2 px-3 py-2.5 text-sm text-slate-700 hover:bg-slate-50 rounded-b-xl"
+            className="w-full inline-flex items-center gap-2 px-3 py-2.5 text-sm text-slate-700 hover:bg-slate-50 rounded-b-xl border-t border-slate-100"
           >
             <LogOut className="w-4 h-4 text-slate-500" />
             Log out

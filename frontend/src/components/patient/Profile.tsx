@@ -9,6 +9,7 @@ import {
   X,
 } from 'lucide-react';
 import { getMyProfile, getPlanMetadata, updateMyProfile } from '../../api/client';
+import { readAuth0ProfileBootstrap } from '../../auth/profileBootstrap';
 import type { MetadataPlan, UserProfileUpdateRequest } from '../../types';
 
 interface ProfileFormState {
@@ -50,12 +51,16 @@ export default function Profile() {
       try {
         const [profileRes, planRes] = await Promise.all([getMyProfile(), getPlanMetadata()]);
         if (!mounted) return;
+        const bootstrap = readAuth0ProfileBootstrap();
+        const fullName = profileRes.profile.full_name || bootstrap?.fullName || '';
+        const email = profileRes.profile.email || bootstrap?.email || '';
+        const phone = profileRes.profile.phone || bootstrap?.phone || '';
         setPlans(planRes.plans);
         setForm({
           user_id: profileRes.profile.user_id,
-          full_name: profileRes.profile.full_name || '',
-          email: profileRes.profile.email || '',
-          phone: profileRes.profile.phone || '',
+          full_name: fullName,
+          email,
+          phone,
           date_of_birth: profileRes.profile.date_of_birth || '',
           state: profileRes.profile.state || '',
           member_id: profileRes.profile.member_id || '',
@@ -66,6 +71,27 @@ export default function Profile() {
           medications: profileRes.profile.medications || [],
           notes: profileRes.profile.notes || '',
         });
+
+        const missingName = !profileRes.profile.full_name && Boolean(fullName);
+        const missingEmail = !profileRes.profile.email && Boolean(email);
+        const missingPhone = !profileRes.profile.phone && Boolean(phone);
+        if (missingName || missingEmail || missingPhone) {
+          const syncPayload: UserProfileUpdateRequest = {
+            full_name: fullName || null,
+            email: email || null,
+            phone: phone || null,
+            date_of_birth: profileRes.profile.date_of_birth || null,
+            state: profileRes.profile.state || null,
+            member_id: profileRes.profile.member_id || null,
+            preferred_language: profileRes.profile.preferred_language || null,
+            preferred_channel: profileRes.profile.preferred_channel || 'web',
+            primary_plan_id: profileRes.profile.primary_plan_id || null,
+            chronic_conditions: profileRes.profile.chronic_conditions || [],
+            medications: profileRes.profile.medications || [],
+            notes: profileRes.profile.notes || null,
+          };
+          void updateMyProfile(syncPayload).catch(() => undefined);
+        }
       } catch {
         if (!mounted) return;
         setError('Unable to load profile details right now.');

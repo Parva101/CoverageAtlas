@@ -76,6 +76,15 @@ interface PlanResult {
   summary: string;
 }
 
+interface TableRowModel {
+  result: PlanResult;
+  priorAuthLabel: string;
+  priorAuthClass: string;
+  stepTherapyLabel: string;
+  stepTherapyClass: string;
+  notes: string;
+}
+
 function statusToLevel(status: CoverageStatus): CoverageLevel {
   if (status === 'covered') return 'covered';
   if (status === 'restricted') return 'restricted';
@@ -112,8 +121,42 @@ function emptyRow(planId: string): CompareRow {
     coverage_status: 'unknown',
     prior_auth_required: null,
     step_therapy_required: null,
+    quantity_limit_text: null,
+    site_of_care_text: null,
     criteria_summary: [],
     citations: [],
+  };
+}
+
+function coverageDot(level: CoverageLevel): string {
+  if (level === 'covered') return 'bg-emerald-400';
+  if (level === 'restricted') return 'bg-amber-400';
+  if (level === 'not_covered') return 'bg-red-400';
+  return 'bg-slate-400';
+}
+
+function authRequirement(value: boolean | null): { label: string; className: string } {
+  if (value === true) return { label: 'Required', className: 'text-amber-300' };
+  if (value === false) return { label: 'No', className: 'text-emerald-300' };
+  return { label: 'Unknown', className: 'text-slate-400' };
+}
+
+function summaryNote(row: CompareRow): string {
+  if (row.criteria_summary.length > 0) return row.criteria_summary[0];
+  if (row.site_of_care_text) return row.site_of_care_text;
+  return statusText(row.coverage_status);
+}
+
+function toTableRowModel(result: PlanResult): TableRowModel {
+  const priorAuth = authRequirement(result.row.prior_auth_required);
+  const stepTherapy = authRequirement(result.row.step_therapy_required);
+  return {
+    result,
+    priorAuthLabel: priorAuth.label,
+    priorAuthClass: priorAuth.className,
+    stepTherapyLabel: stepTherapy.label,
+    stepTherapyClass: stepTherapy.className,
+    notes: summaryNote(result.row),
   };
 }
 
@@ -207,6 +250,7 @@ export default function ComparePlans() {
   const [loading, setLoading] = useState(false);
   const [myResult, setMyResult] = useState<PlanResult | null>(null);
   const [bestResult, setBestResult] = useState<PlanResult | null>(null);
+  const [allResults, setAllResults] = useState<PlanResult[]>([]);
   const [error, setError] = useState('');
 
   useEffect(() => {
@@ -245,6 +289,7 @@ export default function ComparePlans() {
     setError('');
     setMyResult(null);
     setBestResult(null);
+    setAllResults([]);
 
     try {
       const planIds = [myPlanId, ...plans.filter(p => p.plan_id !== myPlanId).map(p => p.plan_id)];
@@ -285,6 +330,7 @@ export default function ComparePlans() {
 
       setMyResult(mine);
       setBestResult(best);
+      setAllResults([mine, ...others]);
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : 'Something went wrong. Please try again.';
       setError(message);
@@ -467,6 +513,57 @@ export default function ComparePlans() {
         )}
 
         {/* Disclaimer */}
+        {!loading && allResults.length > 0 && (
+          <section className="rounded-2xl border border-slate-800 bg-slate-950 text-slate-100 shadow-xl overflow-hidden animate-fade-in-up">
+            <div className="px-5 py-4 border-b border-slate-800">
+              <h3 className="text-xl font-semibold">{drugName || 'Medication comparison'}</h3>
+              <p className="text-sm text-slate-400 mt-1">
+                Detailed coverage snapshot across analyzed plans
+              </p>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="min-w-full text-left">
+                <thead className="bg-slate-900/70 text-slate-400 text-xs uppercase tracking-[0.08em]">
+                  <tr>
+                    <th className="px-5 py-3 font-semibold">Plan</th>
+                    <th className="px-4 py-3 font-semibold">Prior Auth</th>
+                    <th className="px-4 py-3 font-semibold">Step Therapy</th>
+                    <th className="px-4 py-3 font-semibold">Notes</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800">
+                  {allResults.map(result => {
+                    const row = toTableRowModel(result);
+                    return (
+                      <tr key={result.plan.plan_id} className="hover:bg-slate-900/40 transition-colors">
+                        <td className="px-5 py-4 align-top">
+                          <div className="flex items-start gap-2.5">
+                            <span className={`mt-1.5 h-2.5 w-2.5 rounded-full ${coverageDot(result.level)}`} />
+                            <div>
+                              <p className="text-base font-semibold text-slate-100">{result.plan.payer_name}</p>
+                              <p className="text-base font-medium text-slate-200">{result.plan.plan_name}</p>
+                            </div>
+                          </div>
+                        </td>
+                        <td className={`px-4 py-4 align-top text-sm font-semibold ${row.priorAuthClass}`}>
+                          {row.priorAuthLabel}
+                        </td>
+                        <td className={`px-4 py-4 align-top text-sm font-semibold ${row.stepTherapyClass}`}>
+                          {row.stepTherapyLabel}
+                        </td>
+                        <td className="px-4 py-4 align-top text-sm text-slate-300 max-w-[20rem]">
+                          {row.notes}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        )}
+
         {!loading && myResult && (
           <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-center animate-fade-in">
             <p className="text-xs text-amber-700 leading-relaxed">

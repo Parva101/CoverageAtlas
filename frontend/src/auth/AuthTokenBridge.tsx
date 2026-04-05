@@ -2,9 +2,10 @@ import { useEffect } from 'react';
 import { useAuth0 } from '@auth0/auth0-react';
 import { clearAuthToken, setAuthTokenProvider } from '../api/client';
 import { auth0Config, hasAuth0CoreConfig, isAuth0Enabled } from './config';
+import { clearAuth0ProfileBootstrap, saveAuth0ProfileBootstrap } from './profileBootstrap';
 
 function Auth0TokenBridgeInner() {
-  const { isAuthenticated, getAccessTokenSilently } = useAuth0();
+  const { isAuthenticated, getAccessTokenSilently, user } = useAuth0();
 
   useEffect(() => {
     const provider = async () => {
@@ -30,6 +31,14 @@ function Auth0TokenBridgeInner() {
 
     return () => setAuthTokenProvider(null);
   }, [getAccessTokenSilently, isAuthenticated]);
+
+  useEffect(() => {
+    if (!isAuthenticated) {
+      clearAuth0ProfileBootstrap();
+      return;
+    }
+    saveAuth0ProfileBootstrap(user);
+  }, [isAuthenticated, user]);
 
   return null;
 }

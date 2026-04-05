@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import AuthPanel from './AuthPanel';
 import ProfileButton from './ProfileButton';
+import ThemeToggle from './ThemeToggle';
 
 const nav = [
   { to: '/ask', label: 'Ask a Question', icon: MessageCircle, description: 'Check your coverage' },
@@ -89,7 +90,10 @@ export default function Layout() {
       {/* Main content */}
       <main className="flex-1 overflow-auto bg-slate-50">
         <div className="sticky top-0 z-20 flex justify-end px-5 py-3 border-b border-slate-200 bg-slate-50/95 backdrop-blur">
-          <ProfileButton />
+          <div className="flex items-center gap-2">
+            <ThemeToggle />
+            <ProfileButton />
+          </div>
         </div>
         <Outlet />
       </main>

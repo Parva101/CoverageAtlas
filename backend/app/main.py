@@ -804,6 +804,8 @@ def compare(
                 "coverage_status": "unknown",
                 "prior_auth_required": None,
                 "step_therapy_required": None,
+                "quantity_limit_text": None,
+                "site_of_care_text": None,
                 "criteria_summary": [],
                 "citations": [],
             })
@@ -814,6 +816,8 @@ def compare(
             "coverage_status": match.get("coverage_status", "unknown"),
             "prior_auth_required": match.get("prior_auth_required"),
             "step_therapy_required": match.get("step_therapy_required"),
+            "quantity_limit_text": match.get("quantity_limit_text"),
+            "site_of_care_text": match.get("site_of_care_text"),
             "criteria_summary": normalize_json(match.get("criteria_summary"), []),
             "citations": normalize_json(match.get("raw_evidence_ref"), []),
         })

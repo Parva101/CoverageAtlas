@@ -63,6 +63,8 @@ export interface CompareRow {
   coverage_status: CoverageStatus;
   prior_auth_required: boolean | null;
   step_therapy_required: boolean | null;
+  quantity_limit_text?: string | null;
+  site_of_care_text?: string | null;
   criteria_summary: string[];
   citations: Citation[];
 }

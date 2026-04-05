@@ -36,7 +36,6 @@ export default function AtlasAssistantChat() {
   const [error, setError] = useState('');
   const [suggestions, setSuggestions] = useState<string[]>(DEMO_SUGGESTIONS);
   const [usingDemoSuggestions, setUsingDemoSuggestions] = useState(true);
-  const [suggestionContext, setSuggestionContext] = useState('');
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const twilioNumber = (import.meta.env.VITE_TWILIO_NUMBER as string | undefined)?.trim() || DEFAULT_TWILIO_NUMBER;
@@ -57,25 +56,11 @@ export default function AtlasAssistantChat() {
         const next = (live.length ? live : demos.length ? demos : DEMO_SUGGESTIONS).slice(0, 6);
         setSuggestions(next);
         setUsingDemoSuggestions(live.length === 0 || !liveEnabled);
-
-        const postgresRules = payload.data_status?.postgres?.coverage_rules ?? 0;
-        const postgresPolicies = payload.data_status?.postgres?.policies ?? 0;
-        const qdrantVectors = payload.data_status?.qdrant?.points_count ?? 0;
-        if (liveEnabled && qdrantVectors > 0) {
-          setSuggestionContext(
-            `Live data: ${postgresRules.toLocaleString()} rules, ${postgresPolicies.toLocaleString()} policies, ${qdrantVectors.toLocaleString()} vectors`,
-          );
-        } else {
-          setSuggestionContext(
-            `Using static demo prompts until vector data is available (rules: ${postgresRules.toLocaleString()}, vectors: ${qdrantVectors.toLocaleString()}).`,
-          );
-        }
       })
       .catch(() => {
         if (cancelled) return;
         setSuggestions(DEMO_SUGGESTIONS);
         setUsingDemoSuggestions(true);
-        setSuggestionContext('Using static demo prompts because live metadata is unavailable.');
       });
 
     return () => {
@@ -191,7 +176,6 @@ export default function AtlasAssistantChat() {
                       </button>
                     ))}
                   </div>
-                  <p className="mt-2 text-[11px] text-slate-500 text-center">{suggestionContext}</p>
                 </div>
               )}
 

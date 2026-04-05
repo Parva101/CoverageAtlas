@@ -202,29 +202,34 @@ export default function Profile() {
 
   if (loading || !form) {
     return (
-      <div className="app-surface py-12 text-center">
-        <Loader2 className="mx-auto h-8 w-8 animate-spin text-blue-600" />
-        <p className="mt-2 text-sm text-slate-600">Loading your profile...</p>
+      <div className="min-h-screen">
+        <div className="max-w-7xl mx-auto px-5 py-8">
+          <div className="app-surface py-12 text-center">
+            <Loader2 className="mx-auto h-8 w-8 animate-spin text-blue-600" />
+            <p className="mt-2 text-sm text-slate-600">Loading your profile...</p>
+          </div>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="space-y-6">
-      <section className="relative overflow-hidden rounded-2xl border border-cyan-200/40 bg-gradient-to-r from-cyan-600 via-teal-600 to-cyan-700 p-7 text-white shadow-xl shadow-cyan-500/10">
-        <div className="absolute -top-20 -right-20 h-60 w-60 rounded-full bg-white/5 blur-2xl" />
-        <div className="absolute -bottom-16 -left-16 h-48 w-48 rounded-full bg-cyan-300/10 blur-2xl" />
-        <div className="relative">
-          <p className="text-xs font-semibold uppercase tracking-[0.15em] text-cyan-100">Personal Workspace</p>
-          <h1 className="mt-2 text-3xl sm:text-4xl font-bold tracking-tight">Your Profile</h1>
-          <p className="mt-2 max-w-2xl text-sm leading-relaxed text-cyan-100">
-            Each user keeps their own profile, plan context, and care preferences so responses stay relevant and personal.
-          </p>
-        </div>
-      </section>
+    <div className="min-h-screen">
+      <div className="max-w-7xl mx-auto px-5 py-8 space-y-6">
+        <section className="relative overflow-hidden rounded-2xl border border-cyan-200/40 bg-gradient-to-r from-cyan-600 via-teal-600 to-cyan-700 p-7 text-white shadow-xl shadow-cyan-500/10">
+          <div className="absolute -top-20 -right-20 h-60 w-60 rounded-full bg-white/5 blur-2xl" />
+          <div className="absolute -bottom-16 -left-16 h-48 w-48 rounded-full bg-cyan-300/10 blur-2xl" />
+          <div className="relative">
+            <p className="text-xs font-semibold uppercase tracking-[0.15em] text-cyan-100">Personal Workspace</p>
+            <h1 className="mt-2 text-3xl sm:text-4xl font-bold tracking-tight">Your Profile</h1>
+            <p className="mt-2 max-w-2xl text-sm leading-relaxed text-cyan-100">
+              Each user keeps their own profile, plan context, and care preferences so responses stay relevant and personal.
+            </p>
+          </div>
+        </section>
 
-      <section className="grid gap-4 lg:grid-cols-[1.2fr_1fr]">
-        <div className="app-surface space-y-4 p-6">
+        <section className="grid gap-4 lg:grid-cols-[1.2fr_1fr]">
+          <div className="app-surface space-y-4 p-6">
           <h2 className="flex items-center gap-2 text-lg font-semibold text-slate-900">
             <UserRound className="h-5 w-5 text-blue-600" />
             Identity & Coverage Details
@@ -329,10 +334,10 @@ export default function Profile() {
               ))}
             </select>
           </div>
-        </div>
+          </div>
 
-        <div className="space-y-4">
-          <section className="app-surface space-y-3 p-5">
+          <div className="space-y-4">
+            <section className="app-surface space-y-3 p-5">
             <h3 className="flex items-center gap-2 text-sm font-semibold text-slate-900">
               <HeartPulse className="h-4 w-4 text-blue-600" />
               Care Context
@@ -403,9 +408,9 @@ export default function Profile() {
                 ))}
               </div>
             </div>
-          </section>
+            </section>
 
-          <section className="app-surface space-y-3 p-5">
+            <section className="app-surface space-y-3 p-5">
             <h3 className="text-sm font-semibold text-slate-900">Notes</h3>
             <textarea
               value={form.notes}
@@ -413,36 +418,37 @@ export default function Profile() {
               className="app-input min-h-[120px] resize-y"
               placeholder="Anything your care team should remember..."
             />
-          </section>
-        </div>
-      </section>
+            </section>
+          </div>
+        </section>
 
-      <section className="app-surface flex flex-wrap items-center justify-between gap-3 p-4">
-        <div className="text-sm text-slate-600">
-          <p className="font-medium text-slate-800">Profile ID: {form.user_id}</p>
-          <p className="mt-1">
-            Primary plan: {selectedPlan ? `${selectedPlan.plan_name} (${selectedPlan.payer_name})` : 'Not selected'}
+        <section className="app-surface flex flex-wrap items-center justify-between gap-3 p-4">
+          <div className="text-sm text-slate-600">
+            <p className="font-medium text-slate-800">Profile ID: {form.user_id}</p>
+            <p className="mt-1">
+              Primary plan: {selectedPlan ? `${selectedPlan.plan_name} (${selectedPlan.payer_name})` : 'Not selected'}
+            </p>
+            {savedAt && <p className="mt-1 text-emerald-700">Saved at {savedAt}</p>}
+            {error && <p className="mt-1 text-red-700">{error}</p>}
+          </div>
+
+          <button onClick={() => void saveProfile()} disabled={saving} className="app-button-primary">
+            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+            {saving ? 'Saving...' : 'Save Profile'}
+          </button>
+        </section>
+
+        <section className="app-surface border-slate-200 bg-slate-50/70 p-4">
+          <p className="flex items-center gap-1.5 text-xs text-slate-600">
+            <ShieldCheck className="h-3.5 w-3.5 text-blue-600" />
+            Profile data is scoped per authenticated user and used only for personalization inside CoverageAtlas.
           </p>
-          {savedAt && <p className="mt-1 text-emerald-700">Saved at {savedAt}</p>}
-          {error && <p className="mt-1 text-red-700">{error}</p>}
-        </div>
-
-        <button onClick={() => void saveProfile()} disabled={saving} className="app-button-primary">
-          {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-          {saving ? 'Saving...' : 'Save Profile'}
-        </button>
-      </section>
-
-      <section className="app-surface border-slate-200 bg-slate-50/70 p-4">
-        <p className="flex items-center gap-1.5 text-xs text-slate-600">
-          <ShieldCheck className="h-3.5 w-3.5 text-blue-600" />
-          Profile data is scoped per authenticated user and used only for personalization inside CoverageAtlas.
-        </p>
-        <p className="mt-1 flex items-center gap-1.5 text-xs text-slate-500">
-          <Sparkles className="h-3.5 w-3.5 text-blue-600" />
-          Keep this updated for better plan guidance and timeline relevance.
-        </p>
-      </section>
+          <p className="mt-1 flex items-center gap-1.5 text-xs text-slate-500">
+            <Sparkles className="h-3.5 w-3.5 text-blue-600" />
+            Keep this updated for better plan guidance and timeline relevance.
+          </p>
+        </section>
+      </div>
     </div>
   );
 }

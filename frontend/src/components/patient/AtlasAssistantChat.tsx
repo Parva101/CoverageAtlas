@@ -3,7 +3,6 @@ import { Link } from 'react-router-dom';
 import { Bot, Loader2, PhoneCall, Send, Shield, Sparkles, User } from 'lucide-react';
 import { postQuery } from '../../api/client';
 import type { QueryResponse } from '../../types';
-import { usePlanMetadata } from '../../hooks/usePlanMetadata';
 import AnswerCard from './AnswerCard';
 import NextSteps from './NextSteps';
 import TermHelper from './TermHelper';
@@ -20,10 +19,10 @@ interface ChatTurn {
 const ASSISTANT_NAME = 'Atlas';
 const DEFAULT_TWILIO_NUMBER = '+1 (602) 610-0653';
 const SUGGESTIONS = [
-  'What documents should I prepare before asking for prior authorization?',
-  'Does my plan likely cover Wegovy and what restrictions should I expect?',
-  'How do I explain medical necessity when a claim gets denied?',
-  'Give me a short script I can use when calling my insurance plan.',
+  'Does my plan cover rituximab for rheumatoid arthritis, and what are the criteria?',
+  'What prior authorization requirements apply to my treatment and what documents are needed?',
+  'What changed in my payer policy this quarter for my drug under medical benefit?',
+  'Compare policy requirements for this drug across two payers and explain the differences.',
 ];
 
 function toTel(value: string): string {
@@ -32,8 +31,6 @@ function toTel(value: string): string {
 
 export default function AtlasAssistantChat() {
   const [question, setQuestion] = useState('');
-  const [payerId, setPayerId] = useState('');
-  const { payers, loading: loadingMetadata, error: metadataError } = usePlanMetadata();
   const [loading, setLoading] = useState(false);
   const [turns, setTurns] = useState<ChatTurn[]>([]);
   const [error, setError] = useState('');
@@ -65,7 +62,6 @@ export default function AtlasAssistantChat() {
     try {
       const response = await postQuery({
         question: clean,
-        filters: payerId ? { payer_ids: [payerId] } : undefined,
       });
       setTurns(prev => prev.map(turn => (turn.id === turnId ? { ...turn, response } : turn)));
     } catch (err: unknown) {
@@ -80,14 +76,14 @@ export default function AtlasAssistantChat() {
   return (
     <div className="min-h-screen">
       <div className="max-w-7xl mx-auto px-5 py-8 space-y-6">
-        <section className="relative overflow-hidden rounded-3xl border border-cyan-200/50 bg-gradient-to-r from-cyan-600 via-sky-600 to-blue-600 p-6 text-white shadow-xl shadow-cyan-500/15">
+        <section className="relative overflow-hidden rounded-3xl border border-indigo-100/90 bg-gradient-to-r from-indigo-600 via-blue-600 to-cyan-600 p-6 text-white shadow-xl shadow-indigo-500/15">
           <div className="absolute -top-20 -right-20 h-60 w-60 rounded-full bg-white/10 blur-2xl" />
           <div className="absolute -bottom-16 -left-16 h-48 w-48 rounded-full bg-cyan-300/15 blur-2xl" />
           <div className="relative grid gap-5 lg:grid-cols-[1.35fr_1fr] items-start">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.12em] text-cyan-100">Coverage Assistant</p>
+              <p className="text-xs font-semibold uppercase tracking-[0.12em] text-indigo-100">Coverage Assistant</p>
               <h1 className="mt-2 text-3xl sm:text-4xl font-bold tracking-tight">Ask About Your Coverage</h1>
-              <p className="mt-2 text-sm text-cyan-100 max-w-2xl">
+              <p className="mt-2 text-sm text-indigo-100 max-w-2xl">
                 Ask policy questions in natural language, get evidence-backed answers, and switch to voice instantly when you want to talk on a real call.
               </p>
               <div className="mt-4 flex flex-wrap gap-2 text-xs">
@@ -98,18 +94,18 @@ export default function AtlasAssistantChat() {
             </div>
             <div className="rounded-2xl border border-white/25 bg-white/10 backdrop-blur-md p-4 space-y-3">
               <div className="flex items-center gap-2">
-                <PhoneCall className="w-4 h-4 text-cyan-100" />
+                <PhoneCall className="w-4 h-4 text-indigo-100" />
                 <p className="text-sm font-semibold">Talk to {ASSISTANT_NAME} on call</p>
               </div>
-              <p className="text-xs text-cyan-100">Prefer voice? Call the Twilio number and continue the same assistant experience by phone.</p>
+              <p className="text-xs text-indigo-100">Prefer voice? Call the Twilio number and continue the same assistant experience by phone.</p>
               <a
                 href={`tel:${toTel(twilioNumber)}`}
-                className="inline-flex items-center gap-2 rounded-xl bg-white text-sky-700 px-3.5 py-2 text-sm font-semibold hover:bg-cyan-50 transition-colors"
+                className="inline-flex items-center gap-2 rounded-xl bg-white text-indigo-700 px-3.5 py-2 text-sm font-semibold hover:bg-indigo-50 transition-colors"
               >
                 <PhoneCall className="w-4 h-4" />
                 {twilioNumber}
               </a>
-              <p className="text-[11px] text-cyan-100">If this is a laptop demo, show this number as the "call Atlas now" action.</p>
+              <p className="text-[11px] text-indigo-100">If this is a laptop demo, show this number as the "call Atlas now" action.</p>
             </div>
           </div>
         </section>
@@ -119,32 +115,15 @@ export default function AtlasAssistantChat() {
             <div className="border-b border-slate-200/40 bg-white/50 backdrop-blur-sm px-4 py-3 flex flex-wrap gap-3 items-center justify-between">
               <div className="flex items-center gap-2.5">
                 <div className="relative">
-                  <div className="absolute -inset-0.5 rounded-xl bg-gradient-to-br from-cyan-400 to-blue-500 opacity-30 blur-sm" />
-                  <div className="relative w-9 h-9 rounded-xl bg-gradient-to-br from-cyan-100 to-sky-100 flex items-center justify-center">
-                    <Bot className="w-5 h-5 text-cyan-700" />
+                  <div className="absolute -inset-0.5 rounded-xl bg-gradient-to-br from-indigo-400 to-blue-500 opacity-30 blur-sm" />
+                  <div className="relative w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-100 to-blue-100 flex items-center justify-center">
+                    <Bot className="w-5 h-5 text-indigo-700" />
                   </div>
                 </div>
                 <div>
                   <p className="text-sm font-semibold text-slate-900">{ASSISTANT_NAME} Chat</p>
-                  <p className="text-xs text-slate-500">Policy Q&A with citations</p>
+                  <p className="text-xs text-slate-500">Profile-aware policy Q&A with citations</p>
                 </div>
-              </div>
-
-              <div className="min-w-[210px]">
-                <select
-                  value={payerId}
-                  onChange={event => setPayerId(event.target.value)}
-                  className="w-full px-3 py-2 border border-slate-200 rounded-xl text-xs bg-white focus:outline-none focus:ring-2 focus:ring-cyan-500"
-                  disabled={loadingMetadata}
-                >
-                  <option value="">All plans</option>
-                  {payers.map(payer => (
-                    <option key={payer.payer_id} value={payer.payer_id}>
-                      {payer.name}
-                    </option>
-                  ))}
-                </select>
-                {metadataError && <p className="text-[11px] text-amber-700 mt-1">{metadataError}</p>}
               </div>
             </div>
 
@@ -152,10 +131,10 @@ export default function AtlasAssistantChat() {
               {turns.length === 0 && (
                 <div className="h-full flex flex-col justify-center">
                   <div className="text-center mb-5">
-                    <div className="w-14 h-14 mx-auto rounded-2xl bg-cyan-100 flex items-center justify-center">
-                      <Sparkles className="w-7 h-7 text-cyan-700" />
+                    <div className="w-14 h-14 mx-auto rounded-2xl bg-indigo-100 flex items-center justify-center">
+                      <Sparkles className="w-7 h-7 text-indigo-700" />
                     </div>
-                    <p className="mt-3 text-sm font-semibold text-slate-800">Ask {ASSISTANT_NAME} anything about coverage policy.</p>
+                    <p className="mt-3 text-sm font-semibold text-slate-800">Ask {ASSISTANT_NAME} about medical-benefit policy criteria.</p>
                     <p className="text-xs text-slate-500 mt-1">Example prompts to start:</p>
                   </div>
                   <div className="grid gap-2">
@@ -163,7 +142,7 @@ export default function AtlasAssistantChat() {
                       <button
                         key={item}
                         onClick={() => setQuestion(item)}
-                        className="text-left px-3 py-2.5 rounded-xl border border-slate-200 bg-white text-xs text-slate-700 hover:border-cyan-300 hover:bg-cyan-50/60 transition-colors"
+                        className="text-left px-3 py-2.5 rounded-xl border border-slate-200 bg-white text-xs text-slate-700 hover:border-indigo-300 hover:bg-indigo-50/60 transition-colors"
                       >
                         {item}
                       </button>
@@ -187,7 +166,7 @@ export default function AtlasAssistantChat() {
                   <div className="flex justify-start animate-slide-in-left">
                     <div className="max-w-[90%] rounded-2xl rounded-bl-sm border border-slate-200/50 bg-white/70 backdrop-blur-sm px-4 py-3 text-sm text-slate-700 shadow-sm">
                       <div className="flex items-center gap-2 mb-1.5">
-                        <Shield className="w-3.5 h-3.5 text-cyan-700" />
+                        <Shield className="w-3.5 h-3.5 text-indigo-700" />
                         <span className="text-[11px] uppercase tracking-wide text-slate-500">{ASSISTANT_NAME}</span>
                       </div>
                       {turn.response && <p className="leading-relaxed">{turn.response.answer}</p>}
@@ -220,12 +199,12 @@ export default function AtlasAssistantChat() {
 
               {loading && (
                 <div className="flex items-center gap-2 text-xs text-slate-500 animate-fade-in">
-                  <Loader2 className="w-4 h-4 animate-spin text-cyan-600" />
+                  <Loader2 className="w-4 h-4 animate-spin text-indigo-600" />
                   <span className="text-slate-500">{ASSISTANT_NAME} is reviewing policy evidence</span>
                   <span className="flex gap-0.5">
-                    <span className="w-1 h-1 bg-cyan-500 rounded-full animate-typing-dot-1" />
-                    <span className="w-1 h-1 bg-cyan-500 rounded-full animate-typing-dot-2" />
-                    <span className="w-1 h-1 bg-cyan-500 rounded-full animate-typing-dot-3" />
+                    <span className="w-1 h-1 bg-indigo-500 rounded-full animate-typing-dot-1" />
+                    <span className="w-1 h-1 bg-indigo-500 rounded-full animate-typing-dot-2" />
+                    <span className="w-1 h-1 bg-indigo-500 rounded-full animate-typing-dot-3" />
                   </span>
                 </div>
               )}
@@ -245,12 +224,12 @@ export default function AtlasAssistantChat() {
                   }}
                   placeholder={`Ask ${ASSISTANT_NAME} about policy coverage, prior auth, denials...`}
                   rows={2}
-                  className="flex-1 px-3 py-2.5 border border-slate-200/60 rounded-xl text-sm bg-white/80 backdrop-blur-sm resize-none focus:outline-none focus:ring-2 focus:ring-cyan-500/40 focus:border-cyan-400 transition-all"
+                  className="flex-1 px-3 py-2.5 border border-slate-200/60 rounded-xl text-sm bg-white/80 backdrop-blur-sm resize-none focus:outline-none focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-400 transition-all"
                 />
                 <button
                   onClick={() => void handleSend()}
                   disabled={loading || !question.trim()}
-                  className="w-11 h-11 rounded-xl bg-gradient-to-br from-cyan-600 to-blue-600 text-white hover:from-cyan-500 hover:to-blue-500 disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center transition-all hover:shadow-lg hover:shadow-cyan-500/25 active:scale-95"
+                  className="w-11 h-11 rounded-xl bg-gradient-to-br from-indigo-600 to-blue-600 text-white hover:from-indigo-500 hover:to-blue-500 disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center transition-all hover:shadow-lg hover:shadow-indigo-500/25 active:scale-95"
                 >
                   <Send className="w-4 h-4" />
                 </button>

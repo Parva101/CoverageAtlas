@@ -6,7 +6,6 @@ import ErrorBoundary from './components/ErrorBoundary';
 
 const AtlasAssistantChat = lazy(() => import('./components/patient/AtlasAssistantChat'));
 const ComparePlans = lazy(() => import('./components/patient/ComparePlans'));
-const VoiceCall = lazy(() => import('./components/patient/VoiceCall'));
 const AccessLab = lazy(() => import('./components/patient/AccessLab'));
 const PolicyTimeline = lazy(() => import('./components/patient/PolicyTimeline'));
 const Profile = lazy(() => import('./components/patient/Profile'));
@@ -66,7 +65,7 @@ export default function App() {
         <Route path="/assistant" element={<Navigate to="/ask" replace />} />
         <Route path="/access-lab" element={<Lazy><AccessLab /></Lazy>} />
         <Route path="/compare" element={<Lazy><ComparePlans /></Lazy>} />
-        <Route path="/voice" element={<Lazy><VoiceCall /></Lazy>} />
+        <Route path="/voice" element={<Navigate to="/ask" replace />} />
         <Route path="/changes" element={<Lazy><PolicyTimeline /></Lazy>} />
         <Route path="/profile" element={<Lazy><Profile /></Lazy>} />
       </Route>

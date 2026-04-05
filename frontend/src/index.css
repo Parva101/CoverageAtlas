@@ -8,17 +8,17 @@
   --font-body: 'Plus Jakarta Sans', 'Segoe UI', sans-serif;
   --font-heading: 'Space Grotesk', 'Plus Jakarta Sans', sans-serif;
 
-  --bg-main: #f8fafc;
+  --bg-main: #060b1f;
   --bg-elevated: #ffffff;
-  --bg-soft: #eef4ff;
-  --border-soft: #d8e2f2;
+  --bg-soft: #dbeafe;
+  --border-soft: #bfdbfe;
 
-  --text-main: #0f172a;
-  --text-muted: #475569;
-  --brand-500: #2563eb;
-  --brand-600: #1d4ed8;
-  --accent-500: #0f766e;
-  --warn-500: #b45309;
+  --text-main: #e2e8f0;
+  --text-muted: #a3b2c7;
+  --brand-500: #4f46e5;
+  --brand-600: #4338ca;
+  --accent-500: #06b6d4;
+  --warn-500: #f59e0b;
 }
 
 *,
@@ -34,14 +34,31 @@ body {
   color: var(--text-main);
   -webkit-font-smoothing: antialiased;
   background:
-    radial-gradient(circle at 8% 6%, rgb(37 99 235 / 14%), transparent 38%),
-    radial-gradient(circle at 92% 4%, rgb(15 118 110 / 12%), transparent 34%),
-    linear-gradient(180deg, #f1f5ff 0%, var(--bg-main) 22%, #f8fbff 100%);
+    radial-gradient(circle at 8% 6%, rgb(79 70 229 / 34%), transparent 36%),
+    radial-gradient(circle at 92% 10%, rgb(6 182 212 / 26%), transparent 34%),
+    radial-gradient(circle at 48% 98%, rgb(99 102 241 / 20%), transparent 40%),
+    linear-gradient(165deg, #020617 0%, var(--bg-main) 38%, #0b1023 100%);
   background-attachment: fixed;
+  position: relative;
 }
 
 #root {
   min-height: 100vh;
+  position: relative;
+  z-index: 1;
+}
+
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(rgb(148 163 184 / 5%) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(148 163 184 / 5%) 1px, transparent 1px);
+  background-size: 44px 44px;
+  mask-image: radial-gradient(circle at 50% 20%, black 35%, transparent 82%);
 }
 
 @layer base {
@@ -56,34 +73,42 @@ body {
   }
 
   ::selection {
-    background: rgb(37 99 235 / 18%);
-    color: #0f172a;
+    background: rgb(99 102 241 / 24%);
+    color: #f8fafc;
   }
 }
 
 @layer components {
   .app-surface {
-    @apply rounded-2xl border border-slate-200/80 bg-white/85 shadow-[0_10px_35px_-20px_rgba(30,64,175,0.48)] backdrop-blur-md;
+    @apply rounded-2xl border border-white/20 bg-white/[0.93] shadow-[0_14px_36px_-24px_rgba(37,99,235,0.55)] backdrop-blur-md;
   }
 
   .app-input {
-    @apply w-full rounded-xl border border-slate-200 bg-white/95 px-4 py-3 text-sm text-slate-800 outline-none transition-all duration-200 placeholder:text-slate-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-100;
+    @apply w-full rounded-xl border border-slate-200/85 bg-white px-4 py-3 text-sm text-slate-800 outline-none transition-all duration-200 placeholder:text-slate-400 focus:border-indigo-500 focus:ring-4 focus:ring-indigo-100;
   }
 
   .app-button-primary {
-    @apply inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-55;
+    @apply inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-indigo-600 to-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-[0_8px_24px_-14px_rgba(79,70,229,0.95)] transition hover:from-indigo-500 hover:to-blue-500 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-55;
   }
 
   .app-button-secondary {
-    @apply inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-sm font-medium text-slate-700 transition hover:border-blue-200 hover:bg-blue-50/60;
+    @apply inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200/90 bg-white px-3.5 py-2 text-sm font-medium text-slate-700 transition hover:border-indigo-200 hover:bg-indigo-50/60;
   }
 
   .app-chip {
-    @apply rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 transition hover:border-blue-200 hover:bg-blue-50/50;
+    @apply rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 transition hover:border-indigo-200 hover:bg-indigo-50/60;
   }
 
   .app-chip-active {
-    @apply border-blue-200 bg-blue-50 text-blue-700;
+    @apply border-indigo-200 bg-indigo-50 text-indigo-700;
+  }
+
+  .app-sidebar-shell {
+    @apply border-r border-white/10 bg-slate-950/85 text-slate-100 backdrop-blur-xl;
+  }
+
+  .app-sidebar-card {
+    @apply rounded-2xl border border-slate-800 bg-slate-900/90 shadow-[0_10px_26px_-20px_rgba(14,165,233,0.65)];
   }
 }
 

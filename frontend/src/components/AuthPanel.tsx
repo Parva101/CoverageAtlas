@@ -2,32 +2,52 @@ import { useAuth0 } from '@auth0/auth0-react';
 import { Loader2, LogIn, LogOut, ShieldCheck, UserRound } from 'lucide-react';
 import { auth0Config } from '../auth/config';
 
-function AuthPanelDisabled() {
+interface AuthPanelProps {
+  variant?: 'default' | 'sidebar';
+}
+
+function AuthPanelDisabled({ variant = 'default' }: AuthPanelProps) {
+  const panelClass = variant === 'sidebar' ? 'app-sidebar-card' : 'app-surface';
+  const titleClass = variant === 'sidebar' ? 'text-slate-100' : 'text-slate-700';
+  const iconClass = variant === 'sidebar' ? 'text-slate-500' : 'text-slate-400';
+  const bodyClass = variant === 'sidebar' ? 'text-slate-400' : 'text-slate-500';
+
   return (
-    <div className="app-surface space-y-2 p-4">
-      <div className="flex items-center gap-2 text-xs font-semibold text-slate-700">
-        <ShieldCheck className="h-4 w-4 text-slate-400" />
+    <div className={`${panelClass} space-y-2 p-4`}>
+      <div className={`flex items-center gap-2 text-xs font-semibold ${titleClass}`}>
+        <ShieldCheck className={`h-4 w-4 ${iconClass}`} />
         Authentication
       </div>
-      <p className="text-xs leading-relaxed text-slate-500">
+      <p className={`text-xs leading-relaxed ${bodyClass}`}>
         Auth0 is not configured in this frontend environment. Add `VITE_AUTH0_*` variables to enable hosted login.
       </p>
     </div>
   );
 }
 
-function AuthPanelEnabled() {
+function AuthPanelEnabled({ variant = 'default' }: AuthPanelProps) {
+  const panelClass = variant === 'sidebar' ? 'app-sidebar-card' : 'app-surface';
+  const titleClass = variant === 'sidebar' ? 'text-slate-100' : 'text-slate-700';
+  const loadingClass = variant === 'sidebar' ? 'text-slate-400' : 'text-slate-500';
+  const identityCardClass =
+    variant === 'sidebar'
+      ? 'rounded-xl border border-emerald-800/70 bg-emerald-500/12 p-3'
+      : 'rounded-xl border border-emerald-200 bg-emerald-50/70 p-3';
+  const identityTitleClass = variant === 'sidebar' ? 'text-emerald-300' : 'text-emerald-800';
+  const identityNameClass = variant === 'sidebar' ? 'text-emerald-200' : 'text-emerald-900';
+  const identityEmailClass = variant === 'sidebar' ? 'text-emerald-300/90' : 'text-emerald-700/90';
+
   const { isLoading, isAuthenticated, user, loginWithRedirect, logout } = useAuth0();
 
   return (
-    <div className="app-surface space-y-3 p-4">
-      <div className="flex items-center gap-2 text-xs font-semibold text-slate-700">
+    <div className={`${panelClass} space-y-3 p-4`}>
+      <div className={`flex items-center gap-2 text-xs font-semibold ${titleClass}`}>
         <ShieldCheck className="h-4 w-4 text-emerald-600" />
         Authentication
       </div>
 
       {isLoading && (
-        <div className="flex items-center gap-2 text-xs text-slate-500">
+        <div className={`flex items-center gap-2 text-xs ${loadingClass}`}>
           <Loader2 className="h-3.5 w-3.5 animate-spin" />
           Checking session...
         </div>
@@ -45,15 +65,15 @@ function AuthPanelEnabled() {
 
       {!isLoading && isAuthenticated && (
         <>
-          <div className="rounded-xl border border-emerald-200 bg-emerald-50/70 p-3">
+          <div className={identityCardClass}>
             <div className="mb-1.5 flex items-center gap-2">
               <UserRound className="h-4 w-4 text-emerald-700" />
-              <p className="text-xs font-semibold text-emerald-800">Signed In</p>
+              <p className={`text-xs font-semibold ${identityTitleClass}`}>Signed In</p>
             </div>
-            <p className="text-xs text-emerald-900">
+            <p className={`text-xs ${identityNameClass}`}>
               {user?.name || user?.email || 'Authenticated user'}
             </p>
-            {user?.email && <p className="mt-1 text-[11px] text-emerald-700/90">{user.email}</p>}
+            {user?.email && <p className={`mt-1 text-[11px] ${identityEmailClass}`}>{user.email}</p>}
           </div>
 
           <button
@@ -64,7 +84,7 @@ function AuthPanelEnabled() {
                 },
               })
             }
-            className="app-button-secondary w-full text-xs"
+            className={`w-full text-xs ${variant === 'sidebar' ? 'app-button-primary' : 'app-button-secondary'}`}
           >
             <LogOut className="h-3.5 w-3.5" />
             Sign out
@@ -75,9 +95,9 @@ function AuthPanelEnabled() {
   );
 }
 
-export default function AuthPanel() {
+export default function AuthPanel({ variant = 'default' }: AuthPanelProps) {
   if (!auth0Config) {
-    return <AuthPanelDisabled />;
+    return <AuthPanelDisabled variant={variant} />;
   }
-  return <AuthPanelEnabled />;
+  return <AuthPanelEnabled variant={variant} />;
 }

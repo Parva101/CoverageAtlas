@@ -9,7 +9,7 @@ psycopg2-binary==2.9.9
 qdrant-client==1.17.1
 
 # AI / Embeddings
-google-generativeai==0.7.2
+google-generativeai==0.8.6
 google-genai==1.70.0
 google-cloud-speech==2.38.0
 google-cloud-texttospeech==2.36.0
@@ -44,3 +44,12 @@ livekit-plugins-silero==1.5.1
 livekit-plugins-google==1.5.1
 livekit-plugins-elevenlabs==1.5.1
 livekit-plugins-deepgram==1.5.1
+
+# Resolver guardrails for cloud build stability
+google-api-core==2.30.2
+googleapis-common-protos==1.74.0
+grpcio==1.80.0
+grpcio-status==1.71.2
+protobuf==5.29.6
+onnxruntime==1.18.1
+opentelemetry-proto==1.39.1

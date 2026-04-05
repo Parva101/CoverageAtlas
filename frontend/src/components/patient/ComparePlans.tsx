@@ -347,19 +347,36 @@ export default function ComparePlans() {
     myResult.row.criteria_summary.length >= bestResult.row.criteria_summary.length;
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50/30 to-white">
+    <div className="space-y-6">
       <div className="max-w-4xl mx-auto px-5 py-10 space-y-6">
-        {/* Header */}
-        <div className="text-center animate-fade-in-up">
-          <div className="inline-flex items-center gap-2 px-3 py-1.5 bg-blue-100 text-blue-700 rounded-full text-xs font-semibold mb-4">
-            <TrendingUp className="w-3.5 h-3.5" />
-            Compare across all available plans
+        <section className="app-page-hero animate-fade-in-up">
+          <div className="app-page-hero-content grid gap-4 md:grid-cols-[1.6fr_1fr] items-start">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-sky-100">Comparison Workspace</p>
+              <h1 className="mt-2 text-3xl font-semibold tracking-tight">Compare Plan Coverage</h1>
+              <p className="mt-2 max-w-lg text-sm leading-relaxed text-sky-100">
+                See how your plan stacks up against alternatives for any medication.
+              </p>
+              <div className="app-page-hero-chip mt-4 inline-flex items-center gap-2">
+                <TrendingUp className="w-3.5 h-3.5" />
+                Compare across all available plans
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-2.5">
+              <div className="app-page-hero-stat">
+                <p>Plans</p>
+                <p className="mt-1 text-lg font-semibold">{loadingPlans ? '...' : plans.length}</p>
+              </div>
+              <div className="app-page-hero-stat">
+                <p>Mode</p>
+                <p className="mt-1 text-sm font-semibold">Plan Compare</p>
+              </div>
+              <div className="app-page-hero-stat col-span-2">
+                Coverage status, prior auth, and step-therapy insights in one view.
+              </div>
+            </div>
           </div>
-          <h1 className="text-3xl font-bold text-slate-900 tracking-tight">Compare Plan Coverage</h1>
-          <p className="text-slate-500 mt-2 text-sm leading-relaxed max-w-lg mx-auto">
-            See how your plan stacks up against alternatives for any medication.
-          </p>
-        </div>
+        </section>
 
         {/* Form card */}
         <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-5 space-y-4 animate-fade-in-up stagger-1">

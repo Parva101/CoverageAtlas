@@ -68,21 +68,36 @@ export default function AskQuestion() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50/30 to-white">
+    <div className="space-y-6">
       <div className="max-w-2xl mx-auto px-5 py-10 space-y-6">
-        {/* Hero */}
-        <div className="text-center animate-fade-in-up">
-          <div className="inline-flex items-center gap-2 px-3 py-1.5 bg-blue-100 text-blue-700 rounded-full text-xs font-semibold mb-4">
-            <ShieldCheck className="w-3.5 h-3.5" />
-            Powered by real policy documents
+        <section className="app-page-hero animate-fade-in-up">
+          <div className="app-page-hero-content grid gap-4 md:grid-cols-[1.6fr_1fr] items-start">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-sky-100">Question Workspace</p>
+              <h1 className="mt-2 text-3xl font-semibold tracking-tight">Ask about your coverage</h1>
+              <p className="mt-2 max-w-md text-sm leading-relaxed text-sky-100">
+                Ask in plain language. We&apos;ll search your plan&apos;s actual policy and explain what we find.
+              </p>
+              <div className="app-page-hero-chip mt-4 inline-flex items-center gap-2">
+                <ShieldCheck className="w-3.5 h-3.5" />
+                Powered by real policy documents
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-2.5">
+              <div className="app-page-hero-stat">
+                <p>Payers loaded</p>
+                <p className="mt-1 text-lg font-semibold">{loadingMetadata ? '...' : payers.length}</p>
+              </div>
+              <div className="app-page-hero-stat">
+                <p>Mode</p>
+                <p className="mt-1 text-sm font-semibold">Coverage Q&A</p>
+              </div>
+              <div className="app-page-hero-stat col-span-2">
+                Refined answers with citations and policy-grounded context.
+              </div>
+            </div>
           </div>
-          <h1 className="text-3xl font-bold text-slate-900 tracking-tight">
-            Ask about your coverage
-          </h1>
-          <p className="text-slate-500 mt-2 text-sm leading-relaxed max-w-md mx-auto">
-            Ask in plain language. We&apos;ll search your plan&apos;s actual policy and explain what we find.
-          </p>
-        </div>
+        </section>
 
         {/* Input card */}
         <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-5 space-y-4 animate-fade-in-up stagger-1">

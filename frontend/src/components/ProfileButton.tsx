@@ -46,10 +46,10 @@ function Auth0ProfileButton() {
     <div ref={rootRef} className="relative">
       <button
         onClick={() => setOpen(prev => !prev)}
-        className="inline-flex items-center gap-2.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm hover:bg-slate-50 transition-colors"
+        className="app-toolbar-button"
         aria-expanded={open}
       >
-        <span className="w-7 h-7 rounded-lg bg-blue-600 text-white text-xs font-bold grid place-items-center">
+        <span className="w-7 h-7 rounded-lg bg-gradient-to-br from-blue-600 to-cyan-600 text-white text-xs font-bold grid place-items-center shadow-md shadow-blue-600/30">
           {initials}
         </span>
         <span className="hidden sm:block font-medium truncate max-w-40">{displayName}</span>
@@ -57,17 +57,17 @@ function Auth0ProfileButton() {
       </button>
 
       {open && (
-        <div className="absolute right-0 mt-2 w-60 rounded-xl border border-slate-200 bg-white shadow-lg z-30">
-          <div className="px-3 py-2.5 border-b border-slate-100">
+        <div className="app-menu-panel">
+          <div className="px-3 py-2.5 border-b app-menu-divider">
             <p className="text-sm font-semibold text-slate-800 truncate">{displayName}</p>
             <p className="text-xs text-slate-500 truncate">{email}</p>
           </div>
           <Link
             to="/profile"
             onClick={() => setOpen(false)}
-            className="w-full inline-flex items-center gap-2 px-3 py-2.5 text-sm text-slate-700 hover:bg-slate-50"
+            className="app-menu-item"
           >
-            <UserRound className="w-4 h-4 text-slate-500" />
+            <UserRound className="w-4 h-4 app-menu-item-muted" />
             My profile
           </Link>
           <button
@@ -75,9 +75,9 @@ function Auth0ProfileButton() {
               clearAuthToken();
               logout({ logoutParams: { returnTo: window.location.origin } });
             }}
-            className="w-full inline-flex items-center gap-2 px-3 py-2.5 text-sm text-slate-700 hover:bg-slate-50 rounded-b-xl border-t border-slate-100"
+            className="app-menu-item rounded-b-xl border-t app-menu-divider"
           >
-            <LogOut className="w-4 h-4 text-slate-500" />
+            <LogOut className="w-4 h-4 app-menu-item-muted" />
             Log out
           </button>
         </div>
@@ -105,10 +105,10 @@ function LocalProfileButton() {
     <div ref={rootRef} className="relative">
       <button
         onClick={() => setOpen(prev => !prev)}
-        className="inline-flex items-center gap-2.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm hover:bg-slate-50 transition-colors"
+        className="app-toolbar-button"
         aria-expanded={open}
       >
-        <span className="w-7 h-7 rounded-lg bg-slate-700 text-white text-xs font-bold grid place-items-center">
+        <span className="w-7 h-7 rounded-lg bg-gradient-to-br from-slate-700 to-slate-800 text-white text-xs font-bold grid place-items-center">
           LP
         </span>
         <span className="hidden sm:block font-medium">Local Profile</span>
@@ -116,17 +116,17 @@ function LocalProfileButton() {
       </button>
 
       {open && (
-        <div className="absolute right-0 mt-2 w-60 rounded-xl border border-slate-200 bg-white shadow-lg z-30">
-          <div className="px-3 py-2.5 border-b border-slate-100">
+        <div className="app-menu-panel">
+          <div className="px-3 py-2.5 border-b app-menu-divider">
             <p className="text-sm font-semibold text-slate-800">Local bypass mode</p>
             <p className="text-xs text-slate-500">Auth0 is not enabled.</p>
           </div>
           <Link
             to="/profile"
             onClick={() => setOpen(false)}
-            className="w-full inline-flex items-center gap-2 px-3 py-2.5 text-sm text-slate-700 hover:bg-slate-50"
+            className="app-menu-item"
           >
-            <UserRound className="w-4 h-4 text-slate-500" />
+            <UserRound className="w-4 h-4 app-menu-item-muted" />
             My profile
           </Link>
           <button
@@ -135,9 +135,9 @@ function LocalProfileButton() {
               setOpen(false);
               window.location.reload();
             }}
-            className="w-full inline-flex items-center gap-2 px-3 py-2.5 text-sm text-slate-700 hover:bg-slate-50 rounded-b-xl border-t border-slate-100"
+            className="app-menu-item rounded-b-xl border-t app-menu-divider"
           >
-            <LogOut className="w-4 h-4 text-slate-500" />
+            <LogOut className="w-4 h-4 app-menu-item-muted" />
             Log out
           </button>
         </div>

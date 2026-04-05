@@ -4,7 +4,6 @@ import {
   Bot,
   GitCompareArrows,
   FlaskConical,
-  Phone,
   Clock3,
   UserRound,
   Shield,
@@ -18,7 +17,6 @@ const nav = [
   { to: '/mascot', label: 'Atlas Mascot AI', icon: Bot, description: 'Chat or switch to phone call' },
   { to: '/access-lab', label: 'Access Lab', icon: FlaskConical, description: 'Plan switch and denial strategy' },
   { to: '/compare', label: 'Compare Plans', icon: GitCompareArrows, description: 'Find the best plan' },
-  { to: '/voice', label: 'Voice Assistant', icon: Phone, description: 'Chat about coverage' },
   { to: '/changes', label: 'Policy Timeline', icon: Clock3, description: 'Track policy changes over time' },
   { to: '/profile', label: 'My Profile', icon: UserRound, description: 'Manage your details and preferences' },
 ];
@@ -27,7 +25,7 @@ export default function Layout() {
   return (
     <div className="min-h-screen flex">
       {/* Sidebar */}
-      <aside className="w-64 bg-gradient-to-b from-slate-900 to-slate-800 flex flex-col shrink-0 shadow-xl">
+      <aside className="app-sidebar-shell w-64 flex flex-col shrink-0 shadow-xl">
         {/* Logo */}
         <div className="p-5 border-b border-slate-700/60">
           <div className="flex items-center gap-3">
@@ -90,8 +88,8 @@ export default function Layout() {
       </aside>
 
       {/* Main content */}
-      <main className="flex-1 overflow-auto bg-slate-50">
-        <div className="sticky top-0 z-20 flex justify-end px-5 py-3 border-b border-slate-200 bg-slate-50/95 backdrop-blur">
+      <main className="app-main-canvas">
+        <div className="app-topbar">
           <div className="flex items-center gap-2">
             <ThemeToggle />
             <ProfileButton />

@@ -1,0 +1,40 @@
+services:
+  - type: web
+    name: coverageatlas-backend
+    runtime: docker
+    plan: free
+    dockerContext: .
+    dockerfilePath: ./Dockerfile.backend
+    autoDeploy: true
+    healthCheckPath: /api/v1/health
+    envVars:
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: QA_MODEL
+        value: gemini-2.5-flash
+      - key: EMBEDDING_MODEL
+        value: models/text-embedding-004
+      - key: DATABASE_URL
+        sync: false
+      - key: QDRANT_URL
+        sync: false
+      - key: QDRANT_API_KEY
+        sync: false
+      - key: QDRANT_COLLECTION
+        value: policy_chunks
+      - key: REDIS_URL
+        sync: false
+      - key: AUTH0_ENABLED
+        value: "true"
+      - key: AUTH0_DOMAIN
+        sync: false
+      - key: AUTH0_AUDIENCE
+        sync: false
+      - key: AUTH0_CLIENT_ID
+        sync: false
+      - key: AUTH0_SCOPE
+        value: openid profile email
+      - key: AUTH0_CACHE_LOCATION
+        value: localstorage
+      - key: AUTH0_USE_REFRESH_TOKENS
+        value: "true"

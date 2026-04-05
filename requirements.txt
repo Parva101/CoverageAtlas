@@ -7,6 +7,14 @@ psycopg2-binary==2.9.9
 
 # Vector DB
 qdrant-client==1.9.1
+# Resolver guardrails (prevents long backtracking during cloud builds)
+grpcio==1.80.0
+grpcio-status==1.80.0
+grpcio-tools==1.80.0
+protobuf==6.33.6
+googleapis-common-protos==1.74.0
+opentelemetry-proto==1.39.1
+onnxruntime==1.24.4
 
 # AI / Embeddings
 google-generativeai==0.7.2

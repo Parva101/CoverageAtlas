@@ -2,6 +2,7 @@ import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import {
   MessageCircle,
   GitCompareArrows,
+  FlaskConical,
   Phone,
   Shield,
   ShieldCheck,
@@ -19,6 +20,12 @@ const nav = [
     label: 'Coverage Q&A',
     subtitle: 'Ask policy questions in plain language',
     icon: MessageCircle,
+  },
+  {
+    to: '/access-lab',
+    label: 'Access Lab',
+    subtitle: 'Simulate plan switching and denial-response strategy',
+    icon: FlaskConical,
   },
   {
     to: '/compare',
@@ -51,6 +58,12 @@ function getPageMeta(pathname: string): { title: string; subtitle: string } {
     return {
       title: 'Plan Comparison',
       subtitle: 'Contrast policy restrictions and likely coverage across plans.',
+    };
+  }
+  if (pathname.startsWith('/access-lab')) {
+    return {
+      title: 'Access Lab',
+      subtitle: 'Run advanced access simulations, denial triage, and appeal drafting workflows.',
     };
   }
   if (pathname.startsWith('/voice')) {

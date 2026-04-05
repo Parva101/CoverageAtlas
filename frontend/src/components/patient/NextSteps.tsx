@@ -1,4 +1,4 @@
-import { ClipboardList } from 'lucide-react';
+import { ClipboardList, ArrowRight } from 'lucide-react';
 import type { QueryResponse } from '../../types';
 
 interface Props {
@@ -21,23 +21,27 @@ export default function NextSteps({ result }: Props) {
   if (answer.includes('appeal'))
     steps.push('If denied, you have the right to appeal the decision.');
 
-  // Always add generic steps
   steps.push('Call the number on the back of your insurance card to confirm.');
   steps.push('Ask your doctor\'s office about helping with the authorization process.');
 
   return (
-    <div className="bg-white rounded-xl border border-slate-200 p-5">
-      <div className="flex items-center gap-2 mb-3">
-        <ClipboardList className="w-5 h-5 text-blue-500" />
+    <div className="bg-white rounded-2xl border border-slate-200 p-5">
+      <div className="flex items-center gap-2.5 mb-4">
+        <div className="w-8 h-8 rounded-lg bg-blue-50 flex items-center justify-center">
+          <ClipboardList className="w-4 h-4 text-blue-600" />
+        </div>
         <h3 className="text-sm font-semibold text-slate-900">What you may need to do</h3>
       </div>
-      <ul className="space-y-2">
+      <ul className="space-y-2.5">
         {steps.map((step, i) => (
-          <li key={i} className="flex items-start gap-3">
-            <span className="w-5 h-5 rounded-full bg-blue-100 text-blue-700 text-xs font-semibold flex items-center justify-center shrink-0 mt-0.5">
+          <li key={i} className="flex items-start gap-3 group">
+            <div className="flex items-center justify-center w-5 h-5 rounded-full bg-blue-600 text-white text-xs font-bold shrink-0 mt-0.5">
               {i + 1}
-            </span>
-            <p className="text-sm text-slate-700 leading-relaxed">{step}</p>
+            </div>
+            <div className="flex-1 flex items-start justify-between gap-2">
+              <p className="text-sm text-slate-700 leading-relaxed">{step}</p>
+              <ArrowRight className="w-3.5 h-3.5 text-slate-300 group-hover:text-blue-400 shrink-0 mt-1 transition-colors" />
+            </div>
           </li>
         ))}
       </ul>

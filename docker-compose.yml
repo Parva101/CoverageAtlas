@@ -37,7 +37,7 @@ services:
       retries: 10
 
   qdrant:
-    image: qdrant/qdrant:v1.9.1
+    image: qdrant/qdrant:latest
     container_name: coverageatlas_qdrant
     restart: unless-stopped
     ports:
@@ -89,6 +89,16 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.frontend
+      args:
+        VITE_API_BASE: ${VITE_API_BASE:-/api/v1}
+        VITE_AUTH0_ENABLED: ${AUTH0_ENABLED:-}
+        VITE_AUTH0_DOMAIN: ${AUTH0_DOMAIN:-}
+        VITE_AUTH0_CLIENT_ID: ${AUTH0_CLIENT_ID:-}
+        VITE_AUTH0_AUDIENCE: ${AUTH0_AUDIENCE:-}
+        VITE_AUTH0_SCOPE: ${AUTH0_SCOPE:-openid profile email}
+        VITE_AUTH0_REDIRECT_URI: ${AUTH0_REDIRECT_URI:-}
+        VITE_AUTH0_CACHE_LOCATION: ${AUTH0_CACHE_LOCATION:-localstorage}
+        VITE_AUTH0_USE_REFRESH_TOKENS: ${AUTH0_USE_REFRESH_TOKENS:-true}
     container_name: coverageatlas_frontend
     restart: unless-stopped
     ports:

@@ -29,6 +29,12 @@ from pathlib import Path
 from datetime import datetime, date
 from typing import Optional
 
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except Exception:
+    pass
+
 import ai_provider
 import db as db_layer
 try:
@@ -262,32 +268,44 @@ def split_into_sections(pages: list[dict], max_chars: int = 3000) -> list[dict]:
 def call_gemini_extractor(chunk_text: str, retries: int = 3) -> list[dict]:
     """Calls Gemini to extract coverage_rules from a text chunk."""
     prompt = EXTRACTION_PROMPT.replace("{chunk_text}", chunk_text[:4000])
+    primary_model = os.environ.get("EXTRACT_MODEL", EXTRACT_MODEL).strip() or EXTRACT_MODEL
+    fallback_model = os.environ.get("QA_MODEL", "gemini-2.5-flash").strip() or "gemini-2.5-flash"
+    model_candidates = [primary_model]
+    if fallback_model not in model_candidates:
+        model_candidates.append(fallback_model)
+    if "gemini-2.5-flash" not in model_candidates:
+        model_candidates.append("gemini-2.5-flash")
 
-    for attempt in range(retries):
-        try:
-            raw = ai_provider.generate_text(
-                prompt,
-                model=EXTRACT_MODEL,
-                temperature=0.0,
-                max_output_tokens=4096,
-            ).strip()
+    for model_name in model_candidates:
+        for attempt in range(retries):
+            try:
+                raw = ai_provider.generate_text(
+                    prompt,
+                    model=model_name,
+                    temperature=0.0,
+                    max_output_tokens=4096,
+                ).strip()
 
-            # Strip markdown fences if present
-            raw = re.sub(r'^```(?:json)?\s*', '', raw, flags=re.MULTILINE)
-            raw = re.sub(r'\s*```$',          '', raw, flags=re.MULTILINE)
-            raw = raw.strip()
+                # Strip markdown fences if present
+                raw = re.sub(r'^```(?:json)?\s*', '', raw, flags=re.MULTILINE)
+                raw = re.sub(r'\s*```$', '', raw, flags=re.MULTILINE)
+                raw = raw.strip()
 
-            rules = json.loads(raw)
-            if isinstance(rules, dict):
-                rules = [rules]   # single rule returned as object
-            return rules
+                rules = json.loads(raw)
+                if isinstance(rules, dict):
+                    rules = [rules]   # single rule returned as object
+                return rules
 
-        except json.JSONDecodeError as e:
-            log.warning(f"  JSON parse error (attempt {attempt+1}): {e}")
-            time.sleep(2 ** attempt)
-        except Exception as e:
-            log.warning(f"  Gemini error (attempt {attempt+1}): {e}")
-            time.sleep(2 ** attempt)
+            except json.JSONDecodeError as e:
+                log.warning(
+                    f"  JSON parse error (model={model_name}, attempt {attempt+1}): {e}"
+                )
+                time.sleep(2 ** attempt)
+            except Exception as e:
+                log.warning(
+                    f"  Gemini error (model={model_name}, attempt {attempt+1}): {e}"
+                )
+                time.sleep(2 ** attempt)
 
     return []
 
@@ -537,12 +555,14 @@ def get_qdrant() -> Optional["QdrantClient"]:
 
 
 def embed_batch(texts: list[str]) -> list[list[float]]:
-    use_output_dim = EMBED_MODEL.startswith("gemini-embedding-")
+    embed_model = os.environ.get("EMBEDDING_MODEL", EMBED_MODEL).strip() or EMBED_MODEL
+    vector_dim = int(os.environ.get("EMBEDDING_DIM", str(VECTOR_DIM)))
+    use_output_dim = embed_model.startswith("gemini-embedding-")
     return ai_provider.embed_texts(
         texts,
-        model=EMBED_MODEL,
+        model=embed_model,
         task_type="RETRIEVAL_DOCUMENT",
-        output_dimensionality=VECTOR_DIM if use_output_dim else None,
+        output_dimensionality=vector_dim if use_output_dim else None,
     )
 
 

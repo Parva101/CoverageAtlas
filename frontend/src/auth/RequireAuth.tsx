@@ -1,6 +1,7 @@
 import type { PropsWithChildren } from 'react';
 import { useEffect, useState } from 'react';
 import { useAuth0 } from '@auth0/auth0-react';
+import { Heart, Loader2, ShieldAlert, ShieldCheck } from 'lucide-react';
 import { clearAuthToken, setAuthToken } from '../api/client';
 import { auth0Config } from './config';
 
@@ -46,10 +47,13 @@ function RequireAuthEnabled({ children }: PropsWithChildren) {
 
   if (isLoading || (isAuthenticated && !tokenReady)) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-50 px-6 text-center">
-        <div>
+      <div className="flex min-h-screen items-center justify-center px-6 text-center">
+        <div className="app-surface max-w-md space-y-3 p-8">
+          <div className="mx-auto flex h-14 w-14 animate-float-soft items-center justify-center rounded-2xl bg-blue-100">
+            <Loader2 className="h-6 w-6 animate-spin text-blue-600" />
+          </div>
           <h1 className="text-lg font-semibold text-slate-900">Loading CoverageAtlas...</h1>
-          <p className="text-sm text-slate-500 mt-2">Verifying your login and access token.</p>
+          <p className="text-sm text-slate-500">Verifying your login and synchronizing your access token.</p>
         </div>
       </div>
     );
@@ -57,16 +61,20 @@ function RequireAuthEnabled({ children }: PropsWithChildren) {
 
   if (!isAuthenticated) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-50 px-6 text-center">
-        <div className="max-w-md">
-          <h1 className="text-xl font-semibold text-slate-900">Sign in to continue</h1>
-          <p className="text-sm text-slate-500 mt-2">
+      <div className="flex min-h-screen items-center justify-center px-6 text-center">
+        <div className="app-surface max-w-md p-8">
+          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-blue-100">
+            <Heart className="h-6 w-6 text-blue-600" />
+          </div>
+          <h1 className="mt-4 text-xl font-semibold text-slate-900">Sign in to continue</h1>
+          <p className="mt-2 text-sm text-slate-500">
             CoverageAtlas uses Auth0 login to protect policy query APIs.
           </p>
           <button
             onClick={() => void loginWithRedirect()}
-            className="mt-5 px-5 py-2.5 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700"
+            className="app-button-primary mt-6 w-full"
           >
+            <ShieldCheck className="h-4 w-4" />
             Sign in with Auth0
           </button>
         </div>
@@ -76,13 +84,16 @@ function RequireAuthEnabled({ children }: PropsWithChildren) {
 
   if (tokenError) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-50 px-6 text-center">
-        <div className="max-w-lg">
-          <h1 className="text-xl font-semibold text-slate-900">Token Error</h1>
-          <p className="text-sm text-slate-600 mt-2">{tokenError}</p>
+      <div className="flex min-h-screen items-center justify-center px-6 text-center">
+        <div className="app-surface max-w-lg p-8">
+          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-red-100">
+            <ShieldAlert className="h-6 w-6 text-red-600" />
+          </div>
+          <h1 className="mt-4 text-xl font-semibold text-slate-900">Token Error</h1>
+          <p className="mt-2 text-sm text-slate-600">{tokenError}</p>
           <button
             onClick={() => window.location.reload()}
-            className="mt-5 px-5 py-2.5 rounded-lg bg-slate-800 text-white text-sm font-medium hover:bg-slate-900"
+            className="app-button-secondary mt-6"
           >
             Retry
           </button>

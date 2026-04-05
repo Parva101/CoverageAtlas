@@ -49,6 +49,30 @@ export interface QueryResponse {
     };
   };
   disclaimer: string;
+  reasoning?: {
+    route?: string;
+    route_reason?: string;
+    evidence_quality?: string;
+    evidence_strength?: number;
+    verifier_supported?: boolean;
+    verifier_reason?: string;
+    supporting_evidence_count?: number;
+  };
+  evidence_cards?: Array<{
+    source_index?: number;
+    payer_name?: string;
+    policy_title?: string;
+    section_title?: string;
+    page_number?: number;
+    snippet?: string;
+    relevance?: number;
+    policy_version_id?: string;
+  }>;
+  customer_help?: {
+    next_best_questions?: string[];
+    what_to_prepare?: string[];
+    call_script?: string[];
+  };
 }
 
 // POST /compare
@@ -63,6 +87,8 @@ export interface CompareRow {
   coverage_status: CoverageStatus;
   prior_auth_required: boolean | null;
   step_therapy_required: boolean | null;
+  quantity_limit_text?: string | null;
+  site_of_care_text?: string | null;
   criteria_summary: string[];
   citations: Citation[];
 }
@@ -111,6 +137,46 @@ export interface PlanMetadataResponse {
   plans: MetadataPlan[];
 }
 
+export interface PolicyVersionMetadata {
+  version_id: string;
+  version_label: string | null;
+  effective_date: string | null;
+  published_date: string | null;
+  is_current: boolean;
+}
+
+export interface PolicyMetadata {
+  policy_id: string;
+  payer_id: string;
+  payer_name: string;
+  policy_title: string;
+  policy_category: PolicyCategory | null;
+  versions: PolicyVersionMetadata[];
+}
+
+export interface PoliciesMetadataResponse {
+  policies: PolicyMetadata[];
+}
+
+export interface PolicyChangeTimelineItem {
+  id: string;
+  policy_id: string;
+  payer_name: string | null;
+  policy_title: string | null;
+  from_version: string | null;
+  to_version: string | null;
+  change_type: ChangeType;
+  field_name: string;
+  old_value: string | null;
+  new_value: string | null;
+  citations: Citation[];
+  detected_at: string | null;
+}
+
+export interface RecentPolicyChangesResponse {
+  changes: PolicyChangeTimelineItem[];
+}
+
 // POST /documents/upload
 export interface DocumentStatus {
   id?: string;
@@ -136,5 +202,42 @@ export interface VoiceMessage {
   role: 'user' | 'assistant';
   text: string;
   timestamp: string;
+}
+
+export interface UserProfile {
+  user_id: string;
+  full_name: string | null;
+  email: string | null;
+  phone: string | null;
+  date_of_birth: string | null;
+  state: string | null;
+  member_id: string | null;
+  preferred_language: string | null;
+  preferred_channel: 'web' | 'voice' | 'email' | null;
+  primary_plan_id: string | null;
+  chronic_conditions: string[];
+  medications: string[];
+  notes: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
+export interface UserProfileResponse {
+  profile: UserProfile;
+}
+
+export interface UserProfileUpdateRequest {
+  full_name?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  date_of_birth?: string | null;
+  state?: string | null;
+  member_id?: string | null;
+  preferred_language?: string | null;
+  preferred_channel?: 'web' | 'voice' | 'email' | null;
+  primary_plan_id?: string | null;
+  chronic_conditions?: string[];
+  medications?: string[];
+  notes?: string | null;
 }
 

@@ -18,7 +18,7 @@ export default function ReasonEvidencePanel({ result }: Props) {
   const supported = reasoning.verifier_supported ?? false;
 
   return (
-    <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-4">
+    <div className="glass-card p-5 space-y-4">
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           {supported ? (
@@ -34,15 +34,15 @@ export default function ReasonEvidencePanel({ result }: Props) {
       </div>
 
       <div className="grid md:grid-cols-3 gap-3">
-        <div className="rounded-lg border border-slate-200 p-3">
+        <div className="rounded-lg border border-slate-200/60 bg-white/60 backdrop-blur-sm p-3">
           <div className="text-[11px] uppercase text-slate-500 tracking-wide">Route</div>
           <div className="text-sm text-slate-800 mt-1">{reasoning.route || 'policy'}</div>
         </div>
-        <div className="rounded-lg border border-slate-200 p-3">
+        <div className="rounded-lg border border-slate-200/60 bg-white/60 backdrop-blur-sm p-3">
           <div className="text-[11px] uppercase text-slate-500 tracking-wide">Verifier</div>
           <div className="text-sm text-slate-800 mt-1">{supported ? 'Supported' : 'Needs caution'}</div>
         </div>
-        <div className="rounded-lg border border-slate-200 p-3">
+        <div className="rounded-lg border border-slate-200/60 bg-white/60 backdrop-blur-sm p-3">
           <div className="text-[11px] uppercase text-slate-500 tracking-wide">Evidence Count</div>
           <div className="text-sm text-slate-800 mt-1">{reasoning.supporting_evidence_count ?? 0}</div>
         </div>

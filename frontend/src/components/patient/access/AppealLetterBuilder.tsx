@@ -1,5 +1,8 @@
 import { useMemo, useState } from 'react';
-import { ClipboardCheck, Copy, Download, FileText, Mail, Sparkles } from 'lucide-react';
+import { ClipboardCheck, Copy, Download, FileText, Loader2, Mail, Sparkles } from 'lucide-react';
+import { postQuery } from '../../../api/client';
+import { usePlanMetadata } from '../../../hooks/usePlanMetadata';
+import type { QueryResponse } from '../../../types';
 
 type UrgencyLevel = 'standard' | 'urgent' | 'expedited';
 type RequestType = 'medication' | 'procedure' | 'therapy' | 'diagnostic';
@@ -96,6 +99,11 @@ export default function AppealLetterBuilder() {
   });
 
   const [copyStatus, setCopyStatus] = useState<'idle' | 'copied' | 'failed'>('idle');
+  const [payerId, setPayerId] = useState('');
+  const { payers, loading: loadingMetadata, error: metadataError } = usePlanMetadata();
+  const [policyAssist, setPolicyAssist] = useState<QueryResponse | null>(null);
+  const [assistLoading, setAssistLoading] = useState(false);
+  const [assistError, setAssistError] = useState('');
 
   const selectedAttachments = useMemo(
     () =>
@@ -171,6 +179,46 @@ export default function AppealLetterBuilder() {
     URL.revokeObjectURL(url);
   };
 
+  const runPolicyAssist = async () => {
+    setAssistLoading(true);
+    setAssistError('');
+    try {
+      const response = await postQuery({
+        question: [
+          `Help draft an appeal for "${form.serviceName}" denied as "${form.denialReason}".`,
+          'Summarize medical-necessity argument, strongest policy-aligned evidence, and key callouts for the letter.',
+        ].join(' '),
+        filters: payerId ? { payer_ids: [payerId] } : undefined,
+      });
+      setPolicyAssist(response);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to load policy evidence.';
+      setAssistError(message);
+      setPolicyAssist(null);
+    } finally {
+      setAssistLoading(false);
+    }
+  };
+
+  const applyPolicyAssist = () => {
+    if (!policyAssist) return;
+    const source =
+      policyAssist.citations[0]
+        ? `${policyAssist.citations[0].section || 'Policy text'}${policyAssist.citations[0].page ? ` - p.${policyAssist.citations[0].page}` : ''}`
+        : '';
+
+    setForm(prev => ({
+      ...prev,
+      denialReason: prev.denialReason.includes('Policy evidence:')
+        ? prev.denialReason
+        : `${prev.denialReason}\nPolicy evidence: ${policyAssist.answer.slice(0, 220)}`,
+      clinicalSummary: `${prev.clinicalSummary}\n\nPolicy evidence summary:\n${policyAssist.answer}${
+        source ? `\nSource: ${source}` : ''
+      }`.trim(),
+      urgencyStatement: `${prev.urgencyStatement}\n\nPolicy-backed urgency note: Prior delay may conflict with documented medical-necessity criteria and continuity-of-care expectations.`.trim(),
+    }));
+  };
+
   return (
     <div className="space-y-4">
       <div className="app-surface border-violet-200 bg-gradient-to-r from-violet-600 to-indigo-600 p-5 text-white">
@@ -223,6 +271,32 @@ export default function AppealLetterBuilder() {
                 onChange={event => setForm(prev => ({ ...prev, planName: event.target.value }))}
                 className="app-input"
               />
+            </div>
+            <div className="md:col-span-2">
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.1em] text-slate-500">
+                Payer filter for policy evidence
+              </label>
+              <select
+                value={payerId}
+                onChange={event => {
+                  const nextId = event.target.value;
+                  setPayerId(nextId);
+                  const selected = payers.find(item => item.payer_id === nextId);
+                  if (selected && !form.payerName) {
+                    setForm(prev => ({ ...prev, payerName: selected.name }));
+                  }
+                }}
+                className="app-input"
+                disabled={loadingMetadata}
+              >
+                <option value="">All payers</option>
+                {payers.map(payer => (
+                  <option key={payer.payer_id} value={payer.payer_id}>
+                    {payer.name}
+                  </option>
+                ))}
+              </select>
+              {metadataError && <p className="mt-1 text-xs text-amber-700">{metadataError}</p>}
             </div>
             <div>
               <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.1em] text-slate-500">
@@ -350,6 +424,40 @@ export default function AppealLetterBuilder() {
                 className="app-input min-h-[90px] resize-y"
               />
             </div>
+          </div>
+
+          <div className="rounded-xl border border-violet-200 bg-violet-50/50 p-3">
+            <p className="text-xs font-semibold uppercase tracking-[0.1em] text-violet-700">Policy-assisted drafting</p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              <button
+                onClick={() => void runPolicyAssist()}
+                disabled={assistLoading}
+                className="app-button-secondary disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                {assistLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+                Generate policy evidence
+              </button>
+              <button
+                onClick={applyPolicyAssist}
+                disabled={!policyAssist}
+                className="app-button-secondary disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                <ClipboardCheck className="h-4 w-4" />
+                Insert into letter
+              </button>
+            </div>
+            {assistError && <p className="mt-2 text-xs text-rose-700">{assistError}</p>}
+            {policyAssist && (
+              <div className="mt-2 rounded-lg border border-violet-200 bg-white p-2.5 text-xs text-slate-700">
+                <p>{policyAssist.answer}</p>
+                {!!policyAssist.citations.length && (
+                  <p className="mt-1 text-slate-500">
+                    Source: {policyAssist.citations[0].section || 'Policy text'}
+                    {policyAssist.citations[0].page ? ` - p.${policyAssist.citations[0].page}` : ''}
+                  </p>
+                )}
+              </div>
+            )}
           </div>
 
           <div>

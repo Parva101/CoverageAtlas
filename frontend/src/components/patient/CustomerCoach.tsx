@@ -15,7 +15,7 @@ export default function CustomerCoach({ result, onUseQuestion }: Props) {
   if (nextQs.length === 0 && prep.length === 0 && callScript.length === 0) return null;
 
   return (
-    <div className="bg-gradient-to-br from-sky-50 to-white rounded-xl border border-sky-200 p-5 space-y-4">
+    <div className="glass-card p-5 space-y-4">
       <div className="flex items-center gap-2">
         <Sparkles className="w-5 h-5 text-sky-600" />
         <h3 className="text-sm font-semibold text-slate-900">Customer Assistant</h3>

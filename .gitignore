@@ -23,3 +23,14 @@ logs/
 *_backup.tar.gz
 coverageatlas_full_*.sql
 coverageatlas_pre_teammate_merge_*.dump
+
+# Frontend build artifacts
+frontend/dist/
+frontend/node_modules/
+node_modules/
+dist/
+build/
+
+# Local audit/debug reports
+frontend/*.report.html
+chromewebdata_*.report.html

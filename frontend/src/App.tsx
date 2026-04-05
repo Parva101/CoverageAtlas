@@ -1,13 +1,36 @@
+import { lazy, Suspense } from 'react';
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import Layout from './components/Layout';
-import AskQuestion from './components/patient/AskQuestion';
-import ComparePlans from './components/patient/ComparePlans';
-import AccessLab from './components/patient/AccessLab';
-import PolicyTimeline from './components/patient/PolicyTimeline';
-import Profile from './components/patient/Profile';
-import MascotChatbot from './components/patient/MascotChatbot';
 import ProtectedRoute from './components/ProtectedRoute';
-import AuthPage from './pages/AuthPage';
+import ErrorBoundary from './components/ErrorBoundary';
+
+const AtlasAssistantChat = lazy(() => import('./components/patient/AtlasAssistantChat'));
+const ComparePlans = lazy(() => import('./components/patient/ComparePlans'));
+const AccessLab = lazy(() => import('./components/patient/AccessLab'));
+const PolicyTimeline = lazy(() => import('./components/patient/PolicyTimeline'));
+const Profile = lazy(() => import('./components/patient/Profile'));
+const AuthPage = lazy(() => import('./pages/AuthPage'));
+
+function PageLoader() {
+  return (
+    <div className="min-h-[300px] grid place-items-center">
+      <div className="text-center space-y-2">
+        <div className="w-8 h-8 border-3 border-blue-200 border-t-blue-600 rounded-full animate-spin mx-auto" />
+        <p className="text-sm text-slate-500">Loading...</p>
+      </div>
+    </div>
+  );
+}
+
+function Lazy({ children }: { children: React.ReactNode }) {
+  return (
+    <ErrorBoundary>
+      <Suspense fallback={<PageLoader />}>
+        {children}
+      </Suspense>
+    </ErrorBoundary>
+  );
+}
 
 function RootEntry() {
   const location = useLocation();
@@ -29,8 +52,8 @@ function RootEntry() {
 export default function App() {
   return (
     <Routes>
-      <Route path="/login" element={<AuthPage mode="login" />} />
-      <Route path="/signup" element={<AuthPage mode="signup" />} />
+      <Route path="/login" element={<Lazy><AuthPage mode="login" /></Lazy>} />
+      <Route path="/signup" element={<Lazy><AuthPage mode="signup" /></Lazy>} />
       <Route
         element={
           <ProtectedRoute>
@@ -38,12 +61,13 @@ export default function App() {
           </ProtectedRoute>
         }
       >
-        <Route path="/ask" element={<AskQuestion />} />
-        <Route path="/mascot" element={<MascotChatbot />} />
-        <Route path="/access-lab" element={<AccessLab />} />
-        <Route path="/compare" element={<ComparePlans />} />
-        <Route path="/changes" element={<PolicyTimeline />} />
-        <Route path="/profile" element={<Profile />} />
+        <Route path="/ask" element={<Lazy><AtlasAssistantChat /></Lazy>} />
+        <Route path="/assistant" element={<Navigate to="/ask" replace />} />
+        <Route path="/access-lab" element={<Lazy><AccessLab /></Lazy>} />
+        <Route path="/compare" element={<Lazy><ComparePlans /></Lazy>} />
+        <Route path="/voice" element={<Navigate to="/ask" replace />} />
+        <Route path="/changes" element={<Lazy><PolicyTimeline /></Lazy>} />
+        <Route path="/profile" element={<Lazy><Profile /></Lazy>} />
       </Route>
       <Route path="/" element={<RootEntry />} />
       <Route path="*" element={<Navigate to="/ask" replace />} />

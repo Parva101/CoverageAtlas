@@ -48,7 +48,7 @@ export default function TermHelper() {
   const [expanded, setExpanded] = useState(false);
 
   return (
-    <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
+    <div className="glass-card overflow-hidden">
       <button
         onClick={() => setExpanded(!expanded)}
         className="flex items-center justify-between w-full px-5 py-4 hover:bg-slate-50 transition-colors"

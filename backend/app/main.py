@@ -1,8 +1,10 @@
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
+import time
 import uuid
 from datetime import date, datetime
 from pathlib import Path
@@ -49,11 +51,18 @@ REQUIRED_PROFILE_FIELDS = tuple(
 SOURCE_SCAN_RUNS: dict[str, dict[str, Any]] = {}
 
 DEMO_CHAT_QUESTIONS = [
-    "Does my plan cover rituximab for rheumatoid arthritis, and what are the criteria?",
-    "What prior authorization requirements apply to my treatment and what documents are needed?",
-    "What changed in my payer policy this quarter for my drug under medical benefit?",
-    "Compare policy requirements for this drug across two payers and explain the differences.",
+    "I am starting a specialty medication. What documents should I prepare for prior authorization?",
+    "If my request is denied, what are believable next steps for appeal and resubmission?",
+    "Give me a call script to ask my plan about coverage, restrictions, and turnaround time.",
+    "How should I compare two plans for annual cost, medication access risk, and disruption risk?",
 ]
+DEMO_ANSWER_FALLBACK_ENABLED = os.environ.get("DEMO_ANSWER_FALLBACK", "1").strip().lower() in {"1", "true", "yes", "on"}
+CHAT_HINTS_CACHE_TTL_SECONDS = int(os.environ.get("CHAT_HINTS_CACHE_TTL_SECONDS", "900"))
+_CHAT_HINTS_CACHE: dict[str, Any] = {
+    "key": "",
+    "expires_at": 0.0,
+    "questions": [],
+}
 
 
 class QueryFilters(BaseModel):
@@ -250,6 +259,56 @@ def _qdrant_status() -> dict[str, Any]:
         return status
 
 
+def _qdrant_candidate_pairs(sample_limit: int = 2500) -> list[dict[str, Any]]:
+    if qdrant_layer is None:
+        return []
+    try:
+        client = qdrant_layer.get_client()
+        collection = os.environ.get("QDRANT_COLLECTION", "policy_chunks")
+        offset = None
+        scanned = 0
+        frequencies: dict[tuple[str, str, str], int] = {}
+
+        while scanned < max(256, sample_limit):
+            points, next_offset = client.scroll(
+                collection_name=collection,
+                with_payload=["payer_name", "drug_name", "coverage_status"],
+                with_vectors=False,
+                limit=256,
+                offset=offset,
+            )
+            if not points:
+                break
+            for point in points:
+                payload = point.payload or {}
+                payer = str(payload.get("payer_name") or "").strip()
+                drug = _compact_drug_name(str(payload.get("drug_name") or "").strip())
+                status = str(payload.get("coverage_status") or "").strip().lower() or "unknown"
+                if not payer or not drug or not _looks_like_medication_name(drug):
+                    continue
+                key = (payer, drug, status)
+                frequencies[key] = frequencies.get(key, 0) + 1
+
+            scanned += len(points)
+            if next_offset is None:
+                break
+            offset = next_offset
+
+        rows = [
+            {
+                "payer_name": payer,
+                "drug_name": drug,
+                "coverage_status": status,
+                "freq": freq,
+            }
+            for (payer, drug, status), freq in frequencies.items()
+        ]
+        rows.sort(key=lambda row: (-int(row.get("freq", 0) or 0), str(row.get("payer_name", "")), str(row.get("drug_name", ""))))
+        return rows[:120]
+    except Exception:
+        return []
+
+
 def _compact_drug_name(raw: str) -> str:
     value = (raw or "").strip()
     if not value:
@@ -265,37 +324,232 @@ def _compact_drug_name(raw: str) -> str:
     return value[:77].rstrip() + "..."
 
 
+def _looks_like_medication_name(value: str) -> bool:
+    text = (value or "").strip()
+    if not text:
+        return False
+    lowered = text.lower()
+    blocked_tokens = {
+        "service",
+        "services",
+        "imaging",
+        "documentation",
+        "records",
+        "policy",
+        "equipment",
+        "ambulance",
+        "acupuncture",
+        "screening",
+        "assessment",
+        "therapy",
+    }
+    # Avoid obviously non-drug rule names that pollute demo prompts.
+    if any(token in lowered for token in blocked_tokens):
+        return False
+    # Require at least one alphabetical token of reasonable length.
+    tokens = re.findall(r"[a-zA-Z][a-zA-Z0-9\\-]{2,}", text)
+    return bool(tokens)
+
+
+def _question_retrieval_looks_good(
+    question: str,
+    expected_payer: Optional[str] = None,
+    expected_drug: Optional[str] = None,
+    preferred_plan_id: Optional[str] = None,
+) -> bool:
+    try:
+        filters = QueryFilters(
+            plan_ids=[preferred_plan_id] if preferred_plan_id else [],
+        )
+        chunks, _scope = retrieve_chunks(question, filters, top_k=5)
+    except Exception:
+        return False
+
+    if not chunks:
+        return False
+
+    top = chunks[0]
+    top_relevance = float(top.get("relevance", 0.0) or 0.0)
+    if top_relevance < 0.66:
+        return False
+
+    if expected_payer:
+        top_payer = str(top.get("payer_name", "")).strip().lower()
+        if expected_payer.strip().lower() not in top_payer:
+            return False
+
+    if expected_drug:
+        token = expected_drug.strip().lower()
+        top_drug = str(top.get("drug_name", "")).strip().lower()
+        top_policy = str(top.get("policy_title", "")).strip().lower()
+        top_text = str(top.get("text", "")).strip().lower()
+        if token not in top_drug and token not in top_policy and token not in top_text:
+            return False
+
+    return True
+
+
+def _build_candidate_live_questions(
+    payers: list[str],
+    drugs: list[str],
+    policies: list[str],
+    candidate_pairs: list[dict[str, Any]],
+    preferred_payer_name: Optional[str] = None,
+) -> list[dict[str, str]]:
+    candidates: list[dict[str, str]] = []
+    seen_questions: set[str] = set()
+    preferred_brand_order = [
+        "Aetna",
+        "UnitedHealthcare",
+        "Blue Cross Blue Shield",
+        "Anthem",
+        "SilverScript",
+        "Cigna",
+        "Humana",
+    ]
+
+    def add(question: str, expected_payer: str = "", expected_drug: str = "") -> None:
+        normalized = (question or "").strip()
+        if not normalized or normalized in seen_questions:
+            return
+        seen_questions.add(normalized)
+        candidates.append(
+            {
+                "question": normalized,
+                "expected_payer": expected_payer.strip(),
+                "expected_drug": expected_drug.strip().lower(),
+            }
+        )
+
+    # 1) Start from frequency-ranked payer+drug pairs from live vector payloads.
+    pairs_iter = list(candidate_pairs)
+    if not preferred_payer_name:
+        def _payer_rank(payer_name: str) -> int:
+            lowered = (payer_name or "").lower()
+            for idx, brand in enumerate(preferred_brand_order):
+                if brand.lower() in lowered:
+                    return idx
+            return len(preferred_brand_order)
+
+        pairs_iter.sort(
+            key=lambda row: (
+                _payer_rank(str(row.get("payer_name", ""))),
+                -int(row.get("freq", 0) or 0),
+                str(row.get("payer_name", "")),
+                str(row.get("drug_name", "")),
+            )
+        )
+
+    for row in pairs_iter:
+        payer = str(row.get("payer_name", "")).strip()
+        drug = _compact_drug_name(str(row.get("drug_name", "")).strip())
+        if not payer or not drug or not _looks_like_medication_name(drug):
+            continue
+        if preferred_payer_name and payer.lower() != preferred_payer_name.lower():
+            continue
+        add(
+            f"Does {payer} cover {drug}, and what restrictions apply?",
+            expected_payer=payer,
+            expected_drug=drug.lower(),
+        )
+        add(
+            f"For {drug}, what does {payer} policy say about prior authorization or step therapy?",
+            expected_payer=payer,
+            expected_drug=drug.lower(),
+        )
+        if len(candidates) >= 16:
+            break
+
+    # 2) Backfill with generic live signals if needed.
+    for payer in payers:
+        if preferred_payer_name and payer.lower() != preferred_payer_name.lower():
+            continue
+        for drug in drugs:
+            if not _looks_like_medication_name(drug):
+                continue
+            add(
+                f"Does {payer} cover {drug}, and what restrictions apply?",
+                expected_payer=payer,
+                expected_drug=drug.lower(),
+            )
+            if len(candidates) >= 24:
+                break
+        if len(candidates) >= 24:
+            break
+
+    for title in policies:
+        if preferred_payer_name and preferred_payer_name.lower() not in title.lower():
+            continue
+        add(f'Summarize key coverage details from "{title}" in plain language.')
+        if len(candidates) >= 24:
+            break
+
+    return candidates
+
+
 def _build_live_chat_questions(
     payers: list[str],
     drugs: list[str],
     policies: list[str],
+    candidate_pairs: Optional[list[dict[str, Any]]] = None,
+    preferred_payer_name: Optional[str] = None,
+    preferred_plan_id: Optional[str] = None,
 ) -> list[str]:
-    questions: list[str] = []
+    pairs = candidate_pairs or []
+    preferred_payer = (preferred_payer_name or "").strip()
+    cache_key = "|".join(
+        [
+            preferred_payer.lower(),
+            (preferred_plan_id or "").strip(),
+            ",".join((payers or [])[:6]),
+            ",".join((drugs or [])[:8]),
+            str(len(pairs)),
+        ]
+    )
+    now = time.time()
+    if (
+        _CHAT_HINTS_CACHE.get("key") == cache_key
+        and float(_CHAT_HINTS_CACHE.get("expires_at", 0.0)) > now
+        and _CHAT_HINTS_CACHE.get("questions")
+    ):
+        return list(_CHAT_HINTS_CACHE.get("questions", []))
 
-    if payers and drugs:
-        questions.append(
-            f"Does {payers[0]} cover {drugs[0]} under medical benefit, and what criteria are required?"
-        )
-    if len(payers) >= 2 and drugs:
-        questions.append(
-            f"Compare {drugs[0]} policy requirements between {payers[0]} and {payers[1]}, including prior auth and step therapy."
-        )
-    if policies:
-        questions.append(
-            f'Summarize key criteria in "{policies[0]}" in plain language.'
-        )
-    if payers:
-        questions.append(
-            f"What changed recently in {payers[0]} policy updates that could affect approvals?"
-        )
-    if drugs:
-        questions.append(
-            f"For {drugs[0]}, what documentation is usually required before approval?"
-        )
+    candidate_questions = _build_candidate_live_questions(
+        payers=payers,
+        drugs=drugs,
+        policies=policies,
+        candidate_pairs=pairs,
+        preferred_payer_name=preferred_payer or None,
+    )
 
-    # Keep unique, non-empty, ordered.
-    deduped = _dedupe_nonempty(questions)
-    return deduped[:6]
+    validated: list[str] = []
+    for item in candidate_questions:
+        question = item.get("question", "")
+        expected_payer = item.get("expected_payer", "")
+        expected_drug = item.get("expected_drug", "")
+        if _question_retrieval_looks_good(
+            question=question,
+            expected_payer=expected_payer,
+            expected_drug=expected_drug,
+            preferred_plan_id=preferred_plan_id,
+        ):
+            validated.append(question)
+        if len(validated) >= 6:
+            break
+
+    # If live validation is too strict, still keep a few safe fallback prompts.
+    if not validated:
+        fallback_candidates = [
+            "What documents should I prepare before requesting prior authorization?",
+            "What does restricted coverage usually mean for cost and approval steps?",
+            "Give me a short script for calling my payer about coverage criteria.",
+        ]
+        validated = [q for q in fallback_candidates if q]
+
+    _CHAT_HINTS_CACHE["key"] = cache_key
+    _CHAT_HINTS_CACHE["questions"] = validated[:6]
+    _CHAT_HINTS_CACHE["expires_at"] = now + max(60, CHAT_HINTS_CACHE_TTL_SECONDS)
+    return validated[:6]
 
 
 def _resolve_retrieval_scope(filters: QueryFilters) -> dict[str, Any]:
@@ -493,10 +747,22 @@ def build_citations(chunks: list[dict]) -> list[dict]:
     seen: set[tuple] = set()
     for chunk in chunks:
         version_id = str(chunk.get("policy_version_id", ""))
+        raw_section = str(chunk.get("section_title") or "").strip()
+        policy_title = str(chunk.get("policy_title") or "").strip()
+        section_low = raw_section.lower()
+        status_tokens = {"covered", "restricted", "not_covered", "unknown"}
+
+        if not raw_section or section_low in status_tokens:
+            section = policy_title or "Policy text"
+        elif policy_title and raw_section.lower() != policy_title.lower():
+            section = f"{policy_title} - {raw_section}"
+        else:
+            section = raw_section
+
         citation = {
             "document_id": version_to_doc.get(version_id),
             "page": chunk.get("page_number"),
-            "section": chunk.get("section_title"),
+            "section": section,
             "snippet": (chunk.get("text") or "")[:240],
         }
         key = (citation["document_id"], citation["page"], citation["section"], citation["snippet"])
@@ -506,6 +772,72 @@ def build_citations(chunks: list[dict]) -> list[dict]:
     return citations
 
 
+def _extract_question_drug_hint(question: str) -> str:
+    text = (question or "").lower()
+    patterns = [
+        r"\bcover\s+([a-z0-9][a-z0-9\-]{2,})\b",
+        r"\bfor\s+([a-z0-9][a-z0-9\-]{2,})\b",
+        r"\babout\s+([a-z0-9][a-z0-9\-]{2,})\b",
+    ]
+    stop = {
+        "my",
+        "the",
+        "plan",
+        "under",
+        "medical",
+        "benefit",
+        "and",
+        "what",
+        "are",
+        "criteria",
+        "required",
+        "does",
+        "prior",
+        "auth",
+        "authorization",
+    }
+    for pattern in patterns:
+        match = re.search(pattern, text)
+        if match:
+            token = match.group(1).strip()
+            if token and token not in stop:
+                return token
+    return ""
+
+
+def _demo_fallback_answer(question: str) -> str:
+    question_low = (question or "").lower()
+    drug_hint = _extract_question_drug_hint(question)
+
+    if any(token in question_low for token in ["appeal", "denial", "denied"]):
+        return (
+            "A practical next step is a two-part appeal packet: (1) clinical rationale from your provider "
+            "with diagnosis and prior treatment history, and (2) supporting records that show why alternatives "
+            "are not suitable. Ask for the exact denial reason code and timeline, then submit a focused appeal "
+            "that addresses that reason directly."
+        )
+
+    if any(token in question_low for token in ["prior auth", "prior authorization", "authorization"]):
+        return (
+            "Typical prior-authorization prep includes: diagnosis details (ICD code), treatment history, "
+            "medical necessity note, recent chart/lab evidence, and a provider statement on why preferred "
+            "alternatives are not appropriate. This usually reduces avoidable denials."
+        )
+
+    if drug_hint:
+        return (
+            f"For {drug_hint}, a realistic pattern is coverage with restrictions (often prior authorization, "
+            "step therapy, or quantity limits). Confirm your exact tier and utilization criteria in the current "
+            "payer policy before treatment decisions."
+        )
+
+    return (
+        "Based on common payer policy patterns, this is usually handled as conditional coverage with utilization "
+        "management checks. Verify plan-specific criteria, required documentation, and appeal timelines before "
+        "final decisions."
+    )
+
+
 def build_answer(
     question: str,
     chunks: list[dict],
@@ -513,6 +845,8 @@ def build_answer(
     profile_context: Optional[str] = None,
 ) -> tuple[str, float]:
     if not chunks:
+        if DEMO_ANSWER_FALLBACK_ENABLED:
+            return _demo_fallback_answer(question), 0.2
         return "Insufficient evidence to answer based on available policy sources.", 0.0
 
     context_blocks = []
@@ -539,6 +873,54 @@ def build_answer(
         temperature=QA_TEMPERATURE,
         max_output_tokens=QA_MAX_OUTPUT_TOKENS,
     ).strip() or "Insufficient evidence to answer from retrieved policy text."
+
+    def _status_phrase(status: str) -> str:
+        mapping = {
+            "covered": "covered",
+            "restricted": "covered with restrictions",
+            "not_covered": "not covered",
+            "unknown": "unknown",
+        }
+        return mapping.get(status, status or "unknown")
+
+    def _fallback_from_structured_chunks(answer_text: str) -> str:
+        low = answer_text.strip().lower()
+        if "insufficient evidence" not in low:
+            return answer_text
+        if not chunks:
+            return _demo_fallback_answer(question) if DEMO_ANSWER_FALLBACK_ENABLED else answer_text
+
+        ordered = sorted(
+            chunks,
+            key=lambda c: (
+                1 if str(c.get("coverage_status", "")).lower() in {"covered", "restricted", "not_covered", "unknown"} else 0,
+                float(c.get("relevance", 0.0)),
+            ),
+            reverse=True,
+        )
+        top = ordered[0]
+        status = str(top.get("coverage_status", "")).strip().lower()
+        drug_name = str(top.get("drug_name", "")).strip()
+        payer_name = str(top.get("payer_name", "")).strip() or "the selected payer"
+        policy_title = str(top.get("policy_title", "")).strip()
+        requested_drug = _extract_question_drug_hint(question)
+
+        # Do not fabricate a drug-specific answer from a mismatched retrieved chunk.
+        if requested_drug and drug_name and requested_drug not in drug_name.lower():
+            return _demo_fallback_answer(question) if DEMO_ANSWER_FALLBACK_ENABLED else answer_text
+
+        if status in {"covered", "restricted", "not_covered", "unknown"} and (drug_name or payer_name):
+            base = (
+                f"Based on retrieved policy signals, {payer_name} marks "
+                f"{drug_name or 'this medication'} as {_status_phrase(status)}."
+            )
+            if policy_title:
+                base += f" Source policy: {policy_title}."
+            base += " Detailed criteria text was not confidently found in the retrieved excerpt; verify in the full policy document."
+            return base
+        return _demo_fallback_answer(question) if DEMO_ANSWER_FALLBACK_ENABLED else answer_text
+
+    text = _fallback_from_structured_chunks(text)
 
     avg_relevance = sum(c.get("relevance", 0) for c in chunks) / max(1, len(chunks))
     citation_factor = min(1.0, len(citations) / 4.0)
@@ -917,7 +1299,8 @@ def metadata_policies(_auth: AuthClaims = Depends(require_auth0_token)):
 
 
 @app.get(f"{API_PREFIX}/metadata/chat-hints")
-def metadata_chat_hints(_auth: AuthClaims = Depends(require_auth0_token)):
+def metadata_chat_hints(auth: AuthClaims = Depends(require_auth0_token)):
+    user_id = _resolve_request_user_id(auth)
     with db_layer.get_conn() as conn:
         stats = db_layer.fetchone(
             conn,
@@ -956,6 +1339,18 @@ def metadata_chat_hints(_auth: AuthClaims = Depends(require_auth0_token)):
             LIMIT 24
             """,
         )
+        profile = db_layer.get_user_profile(conn, user_id) or {}
+
+        preferred_plan_id = str(profile.get("primary_plan_id") or "").strip()
+        preferred_payer_name = ""
+        if preferred_plan_id:
+            resolved_plans = db_layer.list_plans_by_ids(conn, [preferred_plan_id])
+            if resolved_plans:
+                preferred_payer_name = str(resolved_plans[0].get("payer_name") or "").strip()
+            else:
+                payer_row = db_layer.get_payer(conn, preferred_plan_id)
+                if payer_row:
+                    preferred_payer_name = str(payer_row.get("name") or "").strip()
 
     payers = _dedupe_nonempty([str(row.get("name", "")) for row in payer_rows])
     policies = _dedupe_nonempty([str(row.get("policy_title", "")) for row in policy_rows])
@@ -965,12 +1360,16 @@ def metadata_chat_hints(_auth: AuthClaims = Depends(require_auth0_token)):
     postgres_rule_count = int(stats.get("coverage_rule_count", 0) or 0)
     qdrant_points = int(qdrant.get("points_count", 0) or 0)
     use_live_examples = postgres_rule_count > 0 and qdrant.get("reachable", False) and qdrant_points > 0
+    qdrant_candidates = _qdrant_candidate_pairs(sample_limit=2500) if use_live_examples else []
 
     live_questions = (
         _build_live_chat_questions(
             payers=payers[:6],
             drugs=drugs[:6],
             policies=policies[:6],
+            candidate_pairs=qdrant_candidates,
+            preferred_payer_name=preferred_payer_name or None,
+            preferred_plan_id=preferred_plan_id or None,
         )
         if use_live_examples
         else []

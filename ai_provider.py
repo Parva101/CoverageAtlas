@@ -1,4 +1,6 @@
+import json
 import os
+import tempfile
 from functools import lru_cache
 from typing import Iterable, Optional
 
@@ -13,11 +15,97 @@ def _env_bool(name: str, default: bool = False) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
-DEFAULT_USE_VERTEX = _env_bool("AI_USE_VERTEX", True)
+DEFAULT_USE_VERTEX = _env_bool("AI_USE_VERTEX", False)
 DEFAULT_LOCATION = os.environ.get("GOOGLE_CLOUD_LOCATION", "us-central1")
 DEFAULT_EMBEDDING_MODEL = os.environ.get("EMBEDDING_MODEL", "gemini-embedding-001")
 DEFAULT_QA_MODEL = os.environ.get("QA_MODEL", "gemini-2.5-flash")
 DEFAULT_EMBEDDING_DIM = int(os.environ.get("EMBEDDING_DIM", "768"))
+_SA_TEMPFILE_PATH: Optional[str] = None
+
+
+def _first_nonempty(*values: Optional[str]) -> str:
+    for value in values:
+        if value and value.strip():
+            return value.strip()
+    return ""
+
+
+def _vertex_api_key() -> str:
+    return _first_nonempty(
+        os.environ.get("VERTEX_API_KEY"),
+        os.environ.get("GOOGLE_API_KEY"),
+        os.environ.get("GEMINI_API_KEY"),
+    )
+
+
+def _developer_api_key() -> str:
+    return _first_nonempty(
+        os.environ.get("GEMINI_API_KEY"),
+        os.environ.get("GOOGLE_API_KEY"),
+    )
+
+
+def _use_vertex_mode() -> bool:
+    # Explicit switch wins.
+    raw = os.environ.get("AI_USE_VERTEX")
+    if raw is not None:
+        return _env_bool("AI_USE_VERTEX", False)
+
+    provider = os.environ.get("GEMINI_PROVIDER", "").strip().lower()
+    if provider in {"vertex", "vertexai"}:
+        return True
+    if provider in {"developer", "google", "gemini"}:
+        return False
+
+    # Otherwise defer to GOOGLE_GENAI_USE_VERTEXAI if present.
+    return _env_bool("GOOGLE_GENAI_USE_VERTEXAI", False)
+
+
+def _prepare_google_credentials(api_key: str) -> None:
+    """
+    Make cloud deployments resilient when GOOGLE_APPLICATION_CREDENTIALS points to
+    a local path that doesn't exist in the container.
+    """
+    global _SA_TEMPFILE_PATH
+
+    creds_path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS", "").strip()
+    if creds_path and os.path.exists(creds_path):
+        return
+
+    # If inline service account JSON is supplied, materialize it into a temp file.
+    inline_json = _first_nonempty(
+        os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON"),
+        os.environ.get("GOOGLE_CREDENTIALS_JSON"),
+    )
+    if inline_json:
+        parsed = json.loads(inline_json)
+        if not isinstance(parsed, dict):
+            raise RuntimeError("GOOGLE_SERVICE_ACCOUNT_JSON must be a JSON object.")
+        if _SA_TEMPFILE_PATH is None:
+            fh = tempfile.NamedTemporaryFile(
+                mode="w",
+                suffix=".json",
+                prefix="gcp-sa-",
+                delete=False,
+                encoding="utf-8",
+            )
+            with fh:
+                json.dump(parsed, fh)
+            _SA_TEMPFILE_PATH = fh.name
+        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = _SA_TEMPFILE_PATH
+        return
+
+    # If an API key is available, clear the broken file-path env var.
+    if creds_path and api_key:
+        os.environ.pop("GOOGLE_APPLICATION_CREDENTIALS", None)
+        return
+
+    if creds_path and not api_key:
+        raise RuntimeError(
+            "GOOGLE_APPLICATION_CREDENTIALS points to a missing file. "
+            "Set a valid path, or provide GOOGLE_SERVICE_ACCOUNT_JSON, or use "
+            "VERTEX_API_KEY/GOOGLE_API_KEY."
+        )
 
 
 def _extract_text_from_response(response) -> str:
@@ -88,18 +176,24 @@ def _normalize_contents(texts: Iterable[str]) -> list[str]:
 
 @lru_cache(maxsize=1)
 def get_client():
-    use_vertex = _env_bool("AI_USE_VERTEX", DEFAULT_USE_VERTEX)
+    use_vertex = _use_vertex_mode()
     if use_vertex:
         project = os.environ.get("GOOGLE_CLOUD_PROJECT", "").strip()
         if not project:
             raise RuntimeError("AI_USE_VERTEX=1 requires GOOGLE_CLOUD_PROJECT.")
         location = os.environ.get("GOOGLE_CLOUD_LOCATION", DEFAULT_LOCATION).strip() or DEFAULT_LOCATION
-        return genai.Client(vertexai=True, project=project, location=location)
+        api_key = _vertex_api_key()
+        _prepare_google_credentials(api_key=api_key)
+        try:
+            return genai.Client(vertexai=True, project=project, location=location)
+        except Exception:
+            # Cloud-safe fallback: if Vertex auth is misconfigured but API key is present,
+            # continue in Developer API mode rather than failing hard.
+            if api_key:
+                return genai.Client(api_key=api_key)
+            raise
 
-    api_key = (
-        os.environ.get("GEMINI_API_KEY", "").strip()
-        or os.environ.get("GOOGLE_API_KEY", "").strip()
-    )
+    api_key = _developer_api_key()
     if not api_key:
         raise RuntimeError("Set GEMINI_API_KEY or enable AI_USE_VERTEX with Google Cloud project settings.")
     return genai.Client(api_key=api_key)

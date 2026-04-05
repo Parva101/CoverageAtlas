@@ -34,19 +34,17 @@ from qdrant_client.models import (
     PointStruct,
     SearchRequest,
 )
+from qdrant_client.http.exceptions import UnexpectedResponse
 
 # ── Gemini (for smoke test) ─────────────────────────────────────────────────
-import google.generativeai as genai
+import ai_provider
 
-GEMINI_API_KEY    = os.environ.get("GEMINI_API_KEY", "YOUR_GEMINI_API_KEY_HERE")
-QDRANT_URL        = os.environ.get("QDRANT_URL",        "http://localhost:6333")
+QDRANT_URL        = os.environ.get("QDRANT_URL",        "http://10.157.92.242:6333/")
 QDRANT_API_KEY    = os.environ.get("QDRANT_API_KEY",    "")
 QDRANT_COLLECTION = os.environ.get("QDRANT_COLLECTION", "policy_chunks")
+EMBED_MODEL       = os.environ.get("EMBEDDING_MODEL", "gemini-embedding-001")
 
-# Gemini text-embedding-004 produces 768-dim vectors
-VECTOR_DIM = 768
-
-genai.configure(api_key=GEMINI_API_KEY)
+VECTOR_DIM = int(os.environ.get("EMBEDDING_DIM", "768"))
 
 logging.basicConfig(
     level=logging.INFO,
@@ -91,6 +89,7 @@ def get_client() -> QdrantClient:
         url=QDRANT_URL,
         api_key=QDRANT_API_KEY or None,
         timeout=20,
+        check_compatibility=False,
     )
 
 
@@ -252,14 +251,38 @@ def search(
 
     qdrant_filter = Filter(must=conditions) if conditions else None
 
-    results = client.search(
-        collection_name=QDRANT_COLLECTION,
-        query_vector=query_vector,
-        limit=top_k,
-        query_filter=qdrant_filter,
-        with_payload=True,
-        with_vectors=False,   # don't return raw vectors — saves bandwidth
-    )
+    try:
+        if hasattr(client, "query_points"):
+            response = client.query_points(
+                collection_name=QDRANT_COLLECTION,
+                query=query_vector,
+                limit=top_k,
+                query_filter=qdrant_filter,
+                with_payload=True,
+                with_vectors=False,
+            )
+            results = response.points or []
+        else:
+            raise AttributeError("query_points not available")
+    except Exception as exc:
+        is_legacy_404 = (
+            isinstance(exc, UnexpectedResponse)
+            and getattr(exc, "status_code", None) == 404
+        ) or "404" in str(exc)
+        if not is_legacy_404:
+            raise
+
+        legacy = client.http.search_api.search_points(
+            collection_name=QDRANT_COLLECTION,
+            search_request=SearchRequest(
+                vector=query_vector,
+                filter=qdrant_filter,
+                limit=top_k,
+                with_payload=True,
+                with_vector=False,
+            ),
+        )
+        results = legacy.result or []
 
     return [
         {
@@ -332,12 +355,13 @@ def smoke_test(client: QdrantClient):
         "Step therapy applies: must have tried metformin first."
     )
 
-    result = genai.embed_content(
-        model="models/text-embedding-004",
-        content=[sample_text],
-        task_type="retrieval_document"
-    )
-    vector = result["embedding"][0]
+    use_output_dim = EMBED_MODEL.startswith("gemini-embedding-")
+    vector = ai_provider.embed_texts(
+        [sample_text],
+        model=EMBED_MODEL,
+        task_type="RETRIEVAL_DOCUMENT",
+        output_dimensionality=VECTOR_DIM if use_output_dim else None,
+    )[0]
 
     test_id = upsert_chunks(
         client,
@@ -361,12 +385,11 @@ def smoke_test(client: QdrantClient):
     )
 
     # Now search for it
-    query_result = genai.embed_content(
-        model="models/text-embedding-004",
-        content=["Does UHC cover Ozempic for diabetes?"],
-        task_type="retrieval_query"
+    query_vector = ai_provider.embed_query(
+        "Does UHC cover Ozempic for diabetes?",
+        model=EMBED_MODEL,
+        output_dimensionality=VECTOR_DIM if use_output_dim else None,
     )
-    query_vector = query_result["embedding"][0]
 
     hits = search(client, query_vector, top_k=3)
     log.info(f"Search returned {len(hits)} results")

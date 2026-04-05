@@ -5,11 +5,11 @@ version: "3.9"
 #   frontend  → http://localhost:3000   (React via nginx)
 #   backend   → http://localhost:8000   (FastAPI)
 #   postgres  → localhost:5432
-#   qdrant    → http://localhost:6333
+#   qdrant    → http://10.157.92.242:6333/ (external endpoint used by backend)
 #   redis     → localhost:6379
 #
 # Quick start:
-#   1. cp .env.example .env   (fill in GEMINI_API_KEY at minimum)
+#   1. cp .env.example .env   (fill in Vertex/Gemini AI settings)
 #   2. docker compose up --build
 #   3. Open http://localhost:3000
 
@@ -69,7 +69,7 @@ services:
     env_file: .env
     environment:
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/coverageatlas
-      QDRANT_URL:   http://qdrant:6333
+      QDRANT_URL:   http://10.157.92.242:6333/
       REDIS_URL:    redis://redis:6379/0
     ports:
       - "8000:8000"

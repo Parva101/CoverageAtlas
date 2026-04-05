@@ -19,8 +19,12 @@ if str(ROOT_DIR) not in sys.path:
 
 import db as db_layer
 import extraction_agent
-import google.generativeai as genai
-from backend.app.auth import AuthClaims, require_admin_auth
+import ai_provider
+from backend.app.auth import (
+    AuthClaims,
+    require_admin_auth,
+)
+from backend.app.source_refresh import run_refresh
 try:
     import qdrant_setup as qdrant_layer
 except ImportError:
@@ -31,10 +35,11 @@ API_PREFIX = "/api/v1"
 UPLOAD_DIR = ROOT_DIR / "data" / "uploads"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "YOUR_GEMINI_API_KEY_HERE")
-EMBED_MODEL = os.environ.get("EMBEDDING_MODEL", "models/text-embedding-004")
-QA_MODEL = os.environ.get("QA_MODEL", "gemini-1.5-pro")
-genai.configure(api_key=GEMINI_API_KEY)
+EMBED_MODEL = os.environ.get("EMBEDDING_MODEL", "gemini-embedding-001")
+EMBEDDING_DIM = int(os.environ.get("EMBEDDING_DIM", "768"))
+QA_MODEL = os.environ.get("QA_MODEL", "gemini-2.5-flash")
+QA_TEMPERATURE = float(os.environ.get("QA_TEMPERATURE", "0.2"))
+QA_MAX_OUTPUT_TOKENS = int(os.environ.get("QA_MAX_OUTPUT_TOKENS", "2048"))
 
 SOURCE_SCAN_RUNS: dict[str, dict[str, Any]] = {}
 
@@ -68,6 +73,28 @@ class CompareRequest(BaseModel):
 
 class SourceScanRequest(BaseModel):
     source_group: str = "default"
+
+
+class SourceRegistryUpsertRequest(BaseModel):
+    source_key: str
+    display_name: str
+    entry_url: str
+    adapter_name: str = "html_index_links"
+    source_group: str = "default"
+    payer_id: Optional[str] = None
+    source_type: str = "html_index"
+    enabled: bool = True
+    refresh_interval_hours: int = 24
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class SourceRefreshRequest(BaseModel):
+    source_group: str = "default"
+    source_keys: list[str] = Field(default_factory=list)
+    limit_per_source: int = 2
+    dry_run: bool = True
+    fetch_enabled: bool = False
+    ingestion_enabled: bool = False
 
 
 class VoiceStartRequest(BaseModel):
@@ -144,12 +171,12 @@ def _version_label(effective_date_value: Optional[str]) -> str:
 
 
 def _embedding(question: str) -> list[float]:
-    result = genai.embed_content(
+    use_output_dim = EMBED_MODEL.startswith("gemini-embedding-")
+    return ai_provider.embed_query(
+        question,
         model=EMBED_MODEL,
-        content=question,
-        task_type="retrieval_query",
+        output_dimensionality=EMBEDDING_DIM if use_output_dim else None,
     )
-    return result["embedding"]
 
 
 def _dedupe_nonempty(values: list[str]) -> list[str]:
@@ -336,7 +363,7 @@ def build_citations(chunks: list[dict]) -> list[dict]:
         with db_layer.get_conn() as conn:
             rows = db_layer.fetchall(
                 conn,
-                "SELECT id, document_id FROM policy_versions WHERE id = ANY(%s)",
+                "SELECT id, document_id FROM policy_versions WHERE id = ANY(%s::uuid[])",
                 (version_ids,),
             )
             for row in rows:
@@ -380,9 +407,12 @@ def build_answer(question: str, chunks: list[dict], citations: list[dict]) -> tu
         f"Evidence:\n{context}\n"
     )
 
-    model = genai.GenerativeModel(model_name=QA_MODEL)
-    response = model.generate_content(prompt)
-    text = (response.text or "").strip() or "Insufficient evidence to answer from retrieved policy text."
+    text = ai_provider.generate_text(
+        prompt,
+        model=QA_MODEL,
+        temperature=QA_TEMPERATURE,
+        max_output_tokens=QA_MAX_OUTPUT_TOKENS,
+    ).strip() or "Insufficient evidence to answer from retrieved policy text."
 
     avg_relevance = sum(c.get("relevance", 0) for c in chunks) / max(1, len(chunks))
     citation_factor = min(1.0, len(citations) / 4.0)
@@ -690,6 +720,72 @@ def scan_status(scan_id: str):
     if not scan:
         return error_response(404, "NOT_FOUND", "scan_id not found", {"scan_id": scan_id})
     return scan
+
+
+@app.get(f"{API_PREFIX}/sources/registry")
+def list_sources_registry(
+    source_group: Optional[str] = Query(None),
+    enabled_only: bool = Query(True),
+):
+    with db_layer.get_conn() as conn:
+        items = db_layer.list_source_registry(
+            conn,
+            source_group=source_group,
+            enabled_only=enabled_only,
+        )
+    return {"items": items}
+
+
+@app.post(f"{API_PREFIX}/sources/registry/upsert")
+def upsert_source_registry(
+    req: SourceRegistryUpsertRequest,
+    _auth: AuthClaims = Depends(require_admin_auth),
+):
+    with db_layer.get_conn() as conn:
+        source_id = db_layer.upsert_source_registry(
+            conn,
+            source_key=req.source_key.strip(),
+            display_name=req.display_name.strip(),
+            entry_url=req.entry_url.strip(),
+            adapter_name=req.adapter_name.strip() or "html_index_links",
+            source_group=req.source_group.strip() or "default",
+            payer_id=req.payer_id,
+            source_type=req.source_type.strip() or "html_index",
+            enabled=req.enabled,
+            refresh_interval_hours=max(1, min(int(req.refresh_interval_hours), 24 * 14)),
+            metadata=req.metadata,
+        )
+        row = db_layer.fetchone(conn, "SELECT * FROM source_registry WHERE id = %s", (source_id,))
+    return {"item": row}
+
+
+@app.post(f"{API_PREFIX}/sources/refresh")
+def sources_refresh(
+    req: SourceRefreshRequest,
+    _auth: AuthClaims = Depends(require_admin_auth),
+):
+    result = run_refresh(
+        source_group=req.source_group.strip() or "default",
+        source_keys=req.source_keys,
+        limit_per_source=max(1, min(int(req.limit_per_source), 5)),
+        dry_run=req.dry_run,
+        fetch_enabled=req.fetch_enabled,
+        ingestion_enabled=req.ingestion_enabled,
+    )
+    return {
+        "run": result.get("run"),
+        "items": result.get("items", []),
+    }
+
+
+@app.get(f"{API_PREFIX}/sources/refresh/{{run_id}}")
+def get_source_refresh_run(run_id: str):
+    with db_layer.get_conn() as conn:
+        run_row = db_layer.get_source_refresh_run(conn, run_id)
+        if not run_row:
+            return error_response(404, "NOT_FOUND", "run_id not found", {"run_id": run_id})
+        items = db_layer.list_source_refresh_items(conn, run_id)
+    return {"run": run_row, "items": items}
 
 
 @app.post(f"{API_PREFIX}/voice/session/start")

@@ -64,6 +64,7 @@ class PolicyAgent(Agent):
         self._logger = logging.getLogger("policy_voice_agent.tools")
         self._api_base_url = os.environ.get("COVERAGE_API_BASE_URL", "http://127.0.0.1:8000").rstrip("/")
         self._timeout_sec = float(os.environ.get("COVERAGE_API_TIMEOUT_SEC", "30"))
+        self._service_bearer_token = os.environ.get("COVERAGE_API_BEARER_TOKEN", "").strip()
 
     def _ok(self, *, status: str, next_action: str, data: Optional[dict] = None) -> dict[str, Any]:
         return {
@@ -131,12 +132,24 @@ class PolicyAgent(Agent):
         missing_text = ", ".join(missing) if missing else "none"
         return f"known={known_text}; missing={missing_text}"
 
-    async def _post_json(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
+    def _request_headers(self, bearer_token: Optional[str] = None) -> dict[str, str]:
+        token = (bearer_token or "").strip() or self._service_bearer_token
+        if not token:
+            return {}
+        return {"Authorization": f"Bearer {token}"}
+
+    async def _post_json(
+        self,
+        path: str,
+        payload: dict[str, Any],
+        bearer_token: Optional[str] = None,
+    ) -> dict[str, Any]:
         url = f"{self._api_base_url}{path}"
+        headers = self._request_headers(bearer_token)
 
         def _request() -> dict[str, Any]:
             try:
-                response = requests.post(url, json=payload, timeout=self._timeout_sec)
+                response = requests.post(url, json=payload, timeout=self._timeout_sec, headers=headers or None)
             except requests.RequestException as exc:
                 return {"_http_status": None, "_transport_error": str(exc)}
 
@@ -152,12 +165,18 @@ class PolicyAgent(Agent):
 
         return await asyncio.to_thread(_request)
 
-    async def _get_json(self, path: str, params: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+    async def _get_json(
+        self,
+        path: str,
+        params: Optional[dict[str, Any]] = None,
+        bearer_token: Optional[str] = None,
+    ) -> dict[str, Any]:
         url = f"{self._api_base_url}{path}"
+        headers = self._request_headers(bearer_token)
 
         def _request() -> dict[str, Any]:
             try:
-                response = requests.get(url, params=params, timeout=self._timeout_sec)
+                response = requests.get(url, params=params, timeout=self._timeout_sec, headers=headers or None)
             except requests.RequestException as exc:
                 return {"_http_status": None, "_transport_error": str(exc)}
 
@@ -415,6 +434,7 @@ class PolicyAgent(Agent):
                 retryable=False,
             )
 
+        state = self._resolve_state(context)
         response = await self._get_json(
             f"/api/v1/policies/{policy_id}/changes",
             params={"from": from_version, "to": to_version},
@@ -536,7 +556,6 @@ def _extract_context_from_metadata(
     user_id = _first_nonempty(
         user_data.get("id"),
         merged.get("user_id"),
-        merged.get("auth0_sub"),
         merged.get("sub"),
     )
     is_signed_in = _as_bool(

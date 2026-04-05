@@ -30,7 +30,7 @@ CoverageAtlas-main.zip. The spec files that matter most:
 | AI model       | Google Gemini 1.5 Pro (generation)  |
 | Embeddings     | Google text-embedding-004 (768-dim) |
 | Frontend       | Next.js + TypeScript                |
-| Auth           | Auth0 (JWT)                         |
+| Auth           | Bearer JWT (provider-agnostic)                         |
 | Voice          | ElevenLabs (STT + TTS)              |
 | Infrastructure | Docker Compose                      |
 
@@ -183,7 +183,7 @@ Command: docker compose up -d
 ### .env.example
 All required environment variables. Copy to .env and fill in.
   GEMINI_API_KEY, DATABASE_URL, QDRANT_URL, QDRANT_COLLECTION,
-  REDIS_URL, AUTH0_DOMAIN, AUTH0_CLIENT_ID, ELEVENLABS_API_KEY
+  REDIS_URL, LIVEKIT_URL, LIVEKIT_API_KEY, ELEVENLABS_API_KEY
 
 ---
 
@@ -240,8 +240,8 @@ Write results to policy_changes table using db.insert_policy_change().
 Fields to compare: coverage_status, prior_auth_required,
 step_therapy_required, quantity_limit_text, site_of_care_text
 
-### 4. Auth0 Middleware (backend/app/auth.py)
-FastAPI dependency that validates Auth0 JWT on protected endpoints.
+### 4. Auth Middleware (backend/app/auth.py)
+FastAPI dependency that validates bearer JWT on protected endpoints.
 Public: /health, GET /query (read-only)
 Protected: POST /documents/upload, POST /sources/scan
 
@@ -273,7 +273,7 @@ python qdrant_setup.py --init
 
 # 4. Copy and fill in environment variables
 cp .env.example .env
-# Edit .env with your GEMINI_API_KEY, AUTH0_*, ELEVENLABS_API_KEY
+# Edit .env with your GEMINI_API_KEY, LIVEKIT_*, ELEVENLABS_API_KEY
 
 # 5. Install Python dependencies
 pip install -r requirements.txt
@@ -300,7 +300,7 @@ CoverageAtlas/
 ├── backend/
 │   └── app/
 │       ├── main.py              ← FastAPI app, routers
-│       ├── auth.py              ← Auth0 JWT middleware
+│       ├── auth.py              ← JWT middleware
 │       ├── policy/              ← models, schemas, repositories
 │       ├── ingestion/           ← parser, extractor, Celery tasks
 │       ├── qa/                  ← retriever + answer service
@@ -339,3 +339,4 @@ CoverageAtlas/
 8. No medical advice claims anywhere in the system
 9. Qdrant is the ONLY vector store — do not introduce ChromaDB or Pinecone
 10. db.py is the ONLY way to talk to PostgreSQL — no raw psycopg2 elsewhere
+

@@ -186,6 +186,6 @@ Finalize summary and store transcript.
 ```
 
 ## 9) Security (MVP)
-- Auth: JWT/session for web users.
+- Auth: bearer JWT for protected admin endpoints.
 - Admin-only endpoints: upload, source scan config.
 - Rate limit query endpoints.

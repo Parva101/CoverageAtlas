@@ -23,16 +23,14 @@ import argparse
 from pathlib import Path
 from datetime import datetime
 
-import google.generativeai as genai
+import ai_provider
 import chromadb
 from chromadb.config import Settings
 
 # ── Config ─────────────────────────────────────────────────────────────────
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "YOUR_GEMINI_API_KEY_HERE")
-genai.configure(api_key=GEMINI_API_KEY)
-
-EMBED_MODEL  = "models/text-embedding-004"
-CHAT_MODEL   = "gemini-1.5-pro"
+EMBED_MODEL = os.environ.get("EMBEDDING_MODEL", "gemini-embedding-001")
+EMBEDDING_DIM = int(os.environ.get("EMBEDDING_DIM", "768"))
+CHAT_MODEL = os.environ.get("QA_MODEL", "gemini-2.5-flash")
 CHROMA_DIR   = Path("insurance_policies/chroma_db")
 TOP_K        = 8      # chunks to retrieve per query
 MAX_TOKENS   = 2048
@@ -54,12 +52,12 @@ def get_collection():
 
 
 def embed_query(question: str) -> list[float]:
-    result = genai.embed_content(
+    use_output_dim = EMBED_MODEL.startswith("gemini-embedding-")
+    return ai_provider.embed_query(
+        question,
         model=EMBED_MODEL,
-        content=question,
-        task_type="retrieval_query"   # different task type for queries
+        output_dimensionality=EMBEDDING_DIM if use_output_dim else None,
     )
-    return result["embedding"]
 
 
 def retrieve(question: str, collection, payer_filter: str = None, top_k: int = TOP_K):
@@ -137,15 +135,6 @@ def build_context(chunks: list[dict]) -> str:
 
 def ask_gemini(question: str, context: str, chat_history: list = None) -> str:
     """Send question + context to Gemini and get a grounded answer."""
-    model = genai.GenerativeModel(
-        model_name=CHAT_MODEL,
-        system_instruction=SYSTEM_PROMPT,
-        generation_config=genai.GenerationConfig(
-            max_output_tokens=MAX_TOKENS,
-            temperature=0.2,    # low temp = factual, less hallucination
-        )
-    )
-
     prompt = f"""
 POLICY CONTEXT (retrieved from insurance policy database):
 {context}
@@ -157,13 +146,13 @@ Please answer based on the policy context above. Cite which payer/document
 each piece of information comes from.
 """.strip()
 
-    if chat_history:
-        chat = model.start_chat(history=chat_history)
-        response = chat.send_message(prompt)
-    else:
-        response = model.generate_content(prompt)
-
-    return response.text
+    return ai_provider.generate_text(
+        prompt,
+        model=CHAT_MODEL,
+        temperature=0.2,
+        max_output_tokens=MAX_TOKENS,
+        system_instruction=SYSTEM_PROMPT,
+    )
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -374,3 +363,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

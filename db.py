@@ -14,7 +14,7 @@ import uuid
 import logging
 from contextlib import contextmanager
 from datetime import datetime, date
-from typing import Optional
+from typing import Any, Optional
 
 import psycopg2
 import psycopg2.extras
@@ -447,3 +447,355 @@ def compare_drug_across_plans(conn, drug_name: str,
         params.append(payer_ids)
     sql += " ORDER BY p.name"
     return fetchall(conn, sql, params)
+
+
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# SOURCE REFRESH REGISTRY + RUNS
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+
+def upsert_source_registry(
+    conn,
+    *,
+    source_key: str,
+    display_name: str,
+    entry_url: str,
+    adapter_name: str = "mock_static",
+    source_group: str = "default",
+    payer_id: Optional[str] = None,
+    source_type: str = "html_index",
+    enabled: bool = True,
+    refresh_interval_hours: int = 24,
+    metadata: Optional[dict[str, Any]] = None,
+) -> str:
+    return execute(
+        conn,
+        """
+        INSERT INTO source_registry (
+            source_key,
+            payer_id,
+            source_group,
+            display_name,
+            source_type,
+            entry_url,
+            adapter_name,
+            enabled,
+            refresh_interval_hours,
+            metadata
+        ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+        ON CONFLICT (source_key) DO UPDATE SET
+            payer_id = EXCLUDED.payer_id,
+            source_group = EXCLUDED.source_group,
+            display_name = EXCLUDED.display_name,
+            source_type = EXCLUDED.source_type,
+            entry_url = EXCLUDED.entry_url,
+            adapter_name = EXCLUDED.adapter_name,
+            enabled = EXCLUDED.enabled,
+            refresh_interval_hours = EXCLUDED.refresh_interval_hours,
+            metadata = EXCLUDED.metadata,
+            updated_at = NOW()
+        RETURNING id
+        """,
+        (
+            source_key,
+            payer_id,
+            source_group,
+            display_name,
+            source_type,
+            entry_url,
+            adapter_name,
+            enabled,
+            refresh_interval_hours,
+            json.dumps(metadata or {}),
+        ),
+    )
+
+
+def list_source_registry(
+    conn,
+    source_group: Optional[str] = None,
+    enabled_only: bool = True,
+    source_keys: Optional[list[str]] = None,
+) -> list[dict]:
+    where = ["1=1"]
+    params: list[Any] = []
+
+    if source_group:
+        where.append("source_group = %s")
+        params.append(source_group)
+
+    if enabled_only:
+        where.append("enabled = TRUE")
+
+    if source_keys:
+        cleaned = [k.strip() for k in source_keys if k and k.strip()]
+        if cleaned:
+            where.append("source_key = ANY(%s)")
+            params.append(cleaned)
+
+    sql = f"""
+        SELECT *
+        FROM source_registry
+        WHERE {' AND '.join(where)}
+        ORDER BY source_key
+    """
+    return fetchall(conn, sql, tuple(params))
+
+
+def create_source_refresh_run(
+    conn,
+    *,
+    source_group: str,
+    dry_run: bool,
+    fetch_enabled: bool,
+    ingestion_enabled: bool,
+    status: str = "queued",
+    log: Optional[dict[str, Any]] = None,
+) -> str:
+    return execute(
+        conn,
+        """
+        INSERT INTO source_refresh_runs (
+            source_group,
+            status,
+            dry_run,
+            fetch_enabled,
+            ingestion_enabled,
+            log
+        ) VALUES (%s,%s,%s,%s,%s,%s)
+        RETURNING id
+        """,
+        (
+            source_group,
+            status,
+            dry_run,
+            fetch_enabled,
+            ingestion_enabled,
+            json.dumps(log or {}),
+        ),
+    )
+
+
+def mark_source_refresh_run_started(conn, run_id: str):
+    execute(
+        conn,
+        """
+        UPDATE source_refresh_runs
+        SET status = 'running',
+            started_at = NOW(),
+            updated_at = NOW()
+        WHERE id = %s
+        """,
+        (run_id,),
+    )
+
+
+def complete_source_refresh_run(
+    conn,
+    *,
+    run_id: str,
+    status: str,
+    discovered_count: int,
+    changed_count: int,
+    queued_for_ingestion_count: int,
+    failed_count: int,
+    log: Optional[dict[str, Any]] = None,
+    error: Optional[str] = None,
+):
+    execute(
+        conn,
+        """
+        UPDATE source_refresh_runs
+        SET status = %s,
+            discovered_count = %s,
+            changed_count = %s,
+            queued_for_ingestion_count = %s,
+            failed_count = %s,
+            log = %s,
+            error = %s,
+            finished_at = NOW(),
+            updated_at = NOW()
+        WHERE id = %s
+        """,
+        (
+            status,
+            discovered_count,
+            changed_count,
+            queued_for_ingestion_count,
+            failed_count,
+            json.dumps(log or {}),
+            error,
+            run_id,
+        ),
+    )
+
+
+def get_source_refresh_run(conn, run_id: str) -> Optional[dict]:
+    return fetchone(conn, "SELECT * FROM source_refresh_runs WHERE id = %s", (run_id,))
+
+
+def list_source_refresh_runs(conn, limit: int = 20) -> list[dict]:
+    return fetchall(
+        conn,
+        """
+        SELECT *
+        FROM source_refresh_runs
+        ORDER BY created_at DESC
+        LIMIT %s
+        """,
+        (max(1, min(int(limit), 200)),),
+    )
+
+
+def insert_source_refresh_item(
+    conn,
+    *,
+    run_id: str,
+    source_key: str,
+    document_url: str,
+    change_status: str,
+    source_id: Optional[str] = None,
+    external_id: Optional[str] = None,
+    normalized_title: Optional[str] = None,
+    file_type: str = "other",
+    published_date: Optional[str] = None,
+    effective_date: Optional[str] = None,
+    content_hash: Optional[str] = None,
+    etag: Optional[str] = None,
+    last_modified: Optional[str] = None,
+    payload: Optional[dict[str, Any]] = None,
+    error: Optional[str] = None,
+) -> str:
+    return execute(
+        conn,
+        """
+        INSERT INTO source_refresh_items (
+            run_id,
+            source_id,
+            source_key,
+            external_id,
+            document_url,
+            normalized_title,
+            file_type,
+            published_date,
+            effective_date,
+            change_status,
+            content_hash,
+            etag,
+            last_modified,
+            payload,
+            error
+        ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+        RETURNING id
+        """,
+        (
+            run_id,
+            source_id,
+            source_key,
+            external_id,
+            document_url,
+            normalized_title,
+            file_type,
+            published_date,
+            effective_date,
+            change_status,
+            content_hash,
+            etag,
+            last_modified,
+            json.dumps(payload or {}),
+            error,
+        ),
+    )
+
+
+def list_source_refresh_items(conn, run_id: str) -> list[dict]:
+    return fetchall(
+        conn,
+        """
+        SELECT *
+        FROM source_refresh_items
+        WHERE run_id = %s
+        ORDER BY created_at, source_key, document_url
+        """,
+        (run_id,),
+    )
+
+
+def get_source_document_state(conn, source_key: str, document_url: str) -> Optional[dict]:
+    return fetchone(
+        conn,
+        """
+        SELECT *
+        FROM source_document_state
+        WHERE source_key = %s
+          AND document_url = %s
+        """,
+        (source_key, document_url),
+    )
+
+
+def upsert_source_document_state(
+    conn,
+    *,
+    source_key: str,
+    document_url: str,
+    source_id: Optional[str] = None,
+    normalized_title: Optional[str] = None,
+    file_type: str = "other",
+    content_hash: Optional[str] = None,
+    etag: Optional[str] = None,
+    last_modified: Optional[str] = None,
+    published_date: Optional[str] = None,
+    effective_date: Optional[str] = None,
+    last_change_status: str = "unchanged",
+    metadata: Optional[dict[str, Any]] = None,
+) -> str:
+    return execute(
+        conn,
+        """
+        INSERT INTO source_document_state (
+            source_id,
+            source_key,
+            document_url,
+            normalized_title,
+            file_type,
+            content_hash,
+            etag,
+            last_modified,
+            published_date,
+            effective_date,
+            last_change_status,
+            metadata,
+            first_seen_at,
+            last_seen_at,
+            updated_at
+        ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW(),NOW(),NOW())
+        ON CONFLICT (source_key, document_url) DO UPDATE SET
+            source_id = EXCLUDED.source_id,
+            normalized_title = COALESCE(EXCLUDED.normalized_title, source_document_state.normalized_title),
+            file_type = EXCLUDED.file_type,
+            content_hash = COALESCE(EXCLUDED.content_hash, source_document_state.content_hash),
+            etag = COALESCE(EXCLUDED.etag, source_document_state.etag),
+            last_modified = COALESCE(EXCLUDED.last_modified, source_document_state.last_modified),
+            published_date = COALESCE(EXCLUDED.published_date, source_document_state.published_date),
+            effective_date = COALESCE(EXCLUDED.effective_date, source_document_state.effective_date),
+            last_change_status = EXCLUDED.last_change_status,
+            metadata = EXCLUDED.metadata,
+            last_seen_at = NOW(),
+            updated_at = NOW()
+        RETURNING id
+        """,
+        (
+            source_id,
+            source_key,
+            document_url,
+            normalized_title,
+            file_type,
+            content_hash,
+            etag,
+            last_modified,
+            published_date,
+            effective_date,
+            last_change_status,
+            json.dumps(metadata or {}),
+        ),
+    )

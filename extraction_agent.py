@@ -29,19 +29,17 @@ from pathlib import Path
 from datetime import datetime, date
 from typing import Optional
 
+import ai_provider
 import db as db_layer
 try:
     import qdrant_setup as qdrant_layer
 except ImportError:
     qdrant_layer = None
 
-# ── Gemini ─────────────────────────────────────────────────────────────────
-import google.generativeai as genai
-
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "YOUR_GEMINI_API_KEY_HERE")
-genai.configure(api_key=GEMINI_API_KEY)
-EXTRACT_MODEL = "gemini-1.5-pro"
-EMBED_MODEL   = "models/text-embedding-004"
+# ── AI models ───────────────────────────────────────────────────────────────
+EXTRACT_MODEL = os.environ.get("EXTRACT_MODEL", os.environ.get("QA_MODEL", "gemini-2.5-flash"))
+EMBED_MODEL = os.environ.get("EMBEDDING_MODEL", "gemini-embedding-001")
+EMBEDDING_DIM = int(os.environ.get("EMBEDDING_DIM", "768"))
 
 # ── PostgreSQL ─────────────────────────────────────────────────────────────
 try:
@@ -67,10 +65,10 @@ try:
 except ImportError:
     QDRANT_AVAILABLE = False
 
-QDRANT_URL        = os.environ.get("QDRANT_URL", "http://localhost:6333")
+QDRANT_URL        = os.environ.get("QDRANT_URL", "http://10.157.92.242:6333/")
 QDRANT_API_KEY    = os.environ.get("QDRANT_API_KEY", "")
 QDRANT_COLLECTION = os.environ.get("QDRANT_COLLECTION", "policy_chunks")
-VECTOR_DIM        = 768   # text-embedding-004 output dimension
+VECTOR_DIM        = EMBEDDING_DIM
 
 # ── PDF extraction ──────────────────────────────────────────────────────────
 try:
@@ -263,19 +261,16 @@ def split_into_sections(pages: list[dict], max_chars: int = 3000) -> list[dict]:
 
 def call_gemini_extractor(chunk_text: str, retries: int = 3) -> list[dict]:
     """Calls Gemini to extract coverage_rules from a text chunk."""
-    prompt = EXTRACTION_PROMPT.format(chunk_text=chunk_text[:4000])
-    model  = genai.GenerativeModel(
-        model_name=EXTRACT_MODEL,
-        generation_config=genai.GenerationConfig(
-            temperature=0.0,      # deterministic extraction
-            max_output_tokens=4096,
-        )
-    )
+    prompt = EXTRACTION_PROMPT.replace("{chunk_text}", chunk_text[:4000])
 
     for attempt in range(retries):
         try:
-            response = model.generate_content(prompt)
-            raw = response.text.strip()
+            raw = ai_provider.generate_text(
+                prompt,
+                model=EXTRACT_MODEL,
+                temperature=0.0,
+                max_output_tokens=4096,
+            ).strip()
 
             # Strip markdown fences if present
             raw = re.sub(r'^```(?:json)?\s*', '', raw, flags=re.MULTILINE)
@@ -542,12 +537,13 @@ def get_qdrant() -> Optional["QdrantClient"]:
 
 
 def embed_batch(texts: list[str]) -> list[list[float]]:
-    result = genai.embed_content(
+    use_output_dim = EMBED_MODEL.startswith("gemini-embedding-")
+    return ai_provider.embed_texts(
+        texts,
         model=EMBED_MODEL,
-        content=texts,
-        task_type="retrieval_document"
+        task_type="RETRIEVAL_DOCUMENT",
+        output_dimensionality=VECTOR_DIM if use_output_dim else None,
     )
-    return result["embedding"]
 
 
 def upsert_chunks_to_qdrant(client, sections: list[dict],

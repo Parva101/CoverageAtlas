@@ -13,6 +13,12 @@ AuthClaims = dict[str, Any]
 
 ALGORITHMS = ["RS256"]
 JWKS_CACHE_TTL_SECONDS = int(os.environ.get("AUTH0_JWKS_CACHE_TTL_SECONDS", "3600"))
+_DEV_BYPASS_ENABLED = os.environ.get("AUTH0_ALLOW_DEV_BYPASS", "1").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
 
 _jwks_cache: dict[str, Any] = {"value": None, "expires_at": 0.0}
 _jwks_lock = Lock()
@@ -20,15 +26,22 @@ _jwks_lock = Lock()
 bearer_scheme = HTTPBearer(auto_error=False)
 
 
-def _load_jose():
+def _load_jwt():
     try:
-        from jose import JWTError, jwt
+        import jwt
+        from jwt.exceptions import PyJWTError
     except ImportError as exc:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="python-jose is required for Auth0 token validation.",
+            detail="PyJWT is required for Auth0 token validation.",
         ) from exc
-    return jwt, JWTError
+    return jwt, PyJWTError
+
+
+def auth0_is_configured() -> bool:
+    domain = os.environ.get("AUTH0_DOMAIN", "").strip().rstrip("/")
+    audience = os.environ.get("AUTH0_AUDIENCE", "").strip()
+    return bool(domain and audience)
 
 
 def _auth0_settings() -> tuple[str, str, str]:
@@ -109,7 +122,7 @@ def _select_key(jwks: dict[str, Any], kid: str | None) -> dict[str, Any] | None:
 
 
 def verify_auth0_token(token: str) -> AuthClaims:
-    jwt, JWTError = _load_jose()
+    jwt, JWTError = _load_jwt()
     domain, audience, issuer = _auth0_settings()
 
     try:
@@ -133,9 +146,17 @@ def verify_auth0_token(token: str) -> AuthClaims:
         )
 
     try:
+        public_key = jwt.algorithms.RSAAlgorithm.from_jwk(json.dumps(signing_key))
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid signing key format.",
+        ) from exc
+
+    try:
         payload = jwt.decode(
             token,
-            signing_key,
+            key=public_key,
             algorithms=ALGORITHMS,
             audience=audience,
             issuer=issuer,
@@ -168,12 +189,27 @@ def _extract_scopes(payload: AuthClaims) -> set[str]:
 def require_auth0_token(
     credentials: HTTPAuthorizationCredentials = Security(bearer_scheme),
 ) -> AuthClaims:
+    if not auth0_is_configured():
+        if _DEV_BYPASS_ENABLED:
+            return {
+                "sub": os.environ.get("AUTH0_DEV_SUB", "dev-user"),
+                "scope": os.environ.get("AUTH0_ADMIN_SCOPE", "admin:write"),
+                "permissions": [os.environ.get("AUTH0_ADMIN_SCOPE", "admin:write")],
+                "auth_mode": "dev_bypass",
+            }
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Auth0 is not configured.",
+        )
+
     if credentials is None or credentials.scheme.lower() != "bearer":
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Missing bearer token.",
         )
-    return verify_auth0_token(credentials.credentials)
+
+    token = credentials.credentials
+    return verify_auth0_token(token)
 
 
 def require_admin_auth(payload: AuthClaims = Depends(require_auth0_token)) -> AuthClaims:

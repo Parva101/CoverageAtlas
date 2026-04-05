@@ -58,6 +58,108 @@ CREATE INDEX IF NOT EXISTS idx_documents_status  ON documents(ingestion_status);
 CREATE INDEX IF NOT EXISTS idx_documents_sha256  ON documents(sha256);
 CREATE INDEX IF NOT EXISTS idx_documents_payer   ON documents(payer_id);
 
+-- â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+-- 3B. SOURCE REGISTRY + REFRESH RUN TRACKING
+--    Tracks configured source feeds and daily refresh runs before fetch/ingest.
+-- â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+CREATE TABLE IF NOT EXISTS source_registry (
+    id                     UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    source_key             TEXT        NOT NULL UNIQUE,
+    payer_id               UUID        REFERENCES payers(id) ON DELETE SET NULL,
+    source_group           TEXT        NOT NULL DEFAULT 'default',
+    display_name           TEXT        NOT NULL,
+    source_type            TEXT        NOT NULL DEFAULT 'html_index'
+                                      CHECK (source_type IN ('html_index','sitemap','rss','manual')),
+    entry_url              TEXT        NOT NULL,
+    adapter_name           TEXT        NOT NULL,
+    enabled                BOOLEAN     NOT NULL DEFAULT TRUE,
+    refresh_interval_hours INTEGER     NOT NULL DEFAULT 24,
+    metadata               JSONB       NOT NULL DEFAULT '{}',
+    last_discovered_at     TIMESTAMPTZ,
+    last_success_at        TIMESTAMPTZ,
+    last_error             TEXT,
+    created_at             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at             TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_source_registry_group   ON source_registry(source_group);
+CREATE INDEX IF NOT EXISTS idx_source_registry_enabled ON source_registry(enabled);
+CREATE INDEX IF NOT EXISTS idx_source_registry_payer   ON source_registry(payer_id);
+
+CREATE TABLE IF NOT EXISTS source_refresh_runs (
+    id                          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    source_group                TEXT        NOT NULL DEFAULT 'default',
+    status                      TEXT        NOT NULL DEFAULT 'queued'
+                                           CHECK (status IN ('queued','running','completed','failed')),
+    dry_run                     BOOLEAN     NOT NULL DEFAULT TRUE,
+    fetch_enabled               BOOLEAN     NOT NULL DEFAULT FALSE,
+    ingestion_enabled           BOOLEAN     NOT NULL DEFAULT FALSE,
+    discovered_count            INTEGER     NOT NULL DEFAULT 0,
+    changed_count               INTEGER     NOT NULL DEFAULT 0,
+    queued_for_ingestion_count  INTEGER     NOT NULL DEFAULT 0,
+    failed_count                INTEGER     NOT NULL DEFAULT 0,
+    log                         JSONB       NOT NULL DEFAULT '{}',
+    error                       TEXT,
+    created_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    started_at                  TIMESTAMPTZ,
+    finished_at                 TIMESTAMPTZ,
+    updated_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_source_refresh_runs_created ON source_refresh_runs(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_source_refresh_runs_status  ON source_refresh_runs(status);
+
+CREATE TABLE IF NOT EXISTS source_refresh_items (
+    id               UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    run_id           UUID        NOT NULL REFERENCES source_refresh_runs(id) ON DELETE CASCADE,
+    source_id        UUID        REFERENCES source_registry(id) ON DELETE SET NULL,
+    source_key       TEXT        NOT NULL,
+    external_id      TEXT,
+    document_url     TEXT        NOT NULL,
+    normalized_title TEXT,
+    file_type        TEXT        NOT NULL DEFAULT 'other'
+                                 CHECK (file_type IN ('pdf','html','docx','other')),
+    published_date   DATE,
+    effective_date   DATE,
+    change_status    TEXT        NOT NULL
+                                 CHECK (change_status IN ('new','changed','unchanged','skipped','error')),
+    content_hash     TEXT,
+    etag             TEXT,
+    last_modified    TEXT,
+    payload          JSONB       NOT NULL DEFAULT '{}',
+    error            TEXT,
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_source_refresh_items_run    ON source_refresh_items(run_id);
+CREATE INDEX IF NOT EXISTS idx_source_refresh_items_status ON source_refresh_items(change_status);
+CREATE INDEX IF NOT EXISTS idx_source_refresh_items_source ON source_refresh_items(source_key);
+
+CREATE TABLE IF NOT EXISTS source_document_state (
+    id                 UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    source_id          UUID        REFERENCES source_registry(id) ON DELETE SET NULL,
+    source_key         TEXT        NOT NULL,
+    document_url       TEXT        NOT NULL,
+    normalized_title   TEXT,
+    file_type          TEXT        NOT NULL DEFAULT 'other'
+                                     CHECK (file_type IN ('pdf','html','docx','other')),
+    content_hash       TEXT,
+    etag               TEXT,
+    last_modified      TEXT,
+    published_date     DATE,
+    effective_date     DATE,
+    last_change_status TEXT        NOT NULL DEFAULT 'new'
+                                     CHECK (last_change_status IN ('new','changed','unchanged','skipped','error')),
+    metadata           JSONB       NOT NULL DEFAULT '{}',
+    first_seen_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    last_seen_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (source_key, document_url)
+);
+
+CREATE INDEX IF NOT EXISTS idx_source_doc_state_source ON source_document_state(source_key);
+CREATE INDEX IF NOT EXISTS idx_source_doc_state_seen   ON source_document_state(last_seen_at DESC);
+
 -- ────────────────────────────────────────────────────────────
 -- 4. POLICIES
 --    A logical policy (e.g. "UHC Ozempic Medical Benefit Policy")
@@ -187,7 +289,7 @@ CREATE INDEX IF NOT EXISTS idx_changes_detected  ON policy_changes(detected_at);
 -- ────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS qa_sessions (
     id         UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id    TEXT,                   -- Auth0 sub or anonymous id
+    user_id    TEXT,                   -- user subject or anonymous id
     channel    TEXT        NOT NULL DEFAULT 'web'
                CHECK (channel IN ('web','voice')),
     started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -278,3 +380,4 @@ FROM documents d
 LEFT JOIN payers p ON d.payer_id = p.id
 GROUP BY p.name, d.ingestion_status
 ORDER BY p.name, d.ingestion_status;
+

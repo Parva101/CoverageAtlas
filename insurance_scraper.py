@@ -21,12 +21,11 @@ import requests
 from bs4 import BeautifulSoup
 from tqdm import tqdm
 
-# ── Google Gemini ──────────────────────────────────────────────────────────
-import google.generativeai as genai
+# ── Embeddings provider ─────────────────────────────────────────────────────
+import ai_provider
 
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "YOUR_GEMINI_API_KEY_HERE")
-genai.configure(api_key=GEMINI_API_KEY)
-EMBED_MODEL = "models/text-embedding-004"   # 768-dim, free tier generous
+EMBED_MODEL = os.environ.get("EMBEDDING_MODEL", "gemini-embedding-001")
+EMBEDDING_DIM = int(os.environ.get("EMBEDDING_DIM", "768"))
 
 # ── ChromaDB ───────────────────────────────────────────────────────────────
 import chromadb
@@ -157,18 +156,19 @@ def get_chroma_collection() -> chromadb.Collection:
 
 
 def embed_texts(texts: list[str]) -> list[list[float]]:
-    """Batch embed texts via Gemini text-embedding-004."""
+    """Batch embed texts for retrieval indexing."""
     embeddings = []
-    # Gemini allows up to 100 texts per batch
     batch_size = 50
+    use_output_dim = EMBED_MODEL.startswith("gemini-embedding-")
     for i in range(0, len(texts), batch_size):
         batch = texts[i:i+batch_size]
-        result = genai.embed_content(
+        vectors = ai_provider.embed_texts(
+            batch,
             model=EMBED_MODEL,
-            content=batch,
-            task_type="retrieval_document"
+            task_type="RETRIEVAL_DOCUMENT",
+            output_dimensionality=EMBEDDING_DIM if use_output_dim else None,
         )
-        embeddings.extend(result["embedding"])
+        embeddings.extend(vectors)
         time.sleep(0.3)  # respect rate limits
     return embeddings
 

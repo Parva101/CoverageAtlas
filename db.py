@@ -20,10 +20,16 @@ from typing import Any, Optional
 import psycopg2
 import psycopg2.extras
 
-DATABASE_URL = os.environ.get(
-    "DATABASE_URL",
-    "postgresql://postgres:postgres@localhost:5432/coverageatlas"
-)
+def _require_env(name: str) -> str:
+    value = os.environ.get(name, "").strip()
+    if not value:
+        raise RuntimeError(
+            f"{name} is required. Set it to your live Postgres connection string."
+        )
+    return value
+
+
+DATABASE_URL = _require_env("DATABASE_URL")
 
 log = logging.getLogger(__name__)
 _USER_PROFILES_SCHEMA_READY = False

@@ -48,6 +48,13 @@ REQUIRED_PROFILE_FIELDS = tuple(
 
 SOURCE_SCAN_RUNS: dict[str, dict[str, Any]] = {}
 
+DEMO_CHAT_QUESTIONS = [
+    "Does my plan cover rituximab for rheumatoid arthritis, and what are the criteria?",
+    "What prior authorization requirements apply to my treatment and what documents are needed?",
+    "What changed in my payer policy this quarter for my drug under medical benefit?",
+    "Compare policy requirements for this drug across two payers and explain the differences.",
+]
+
 
 class QueryFilters(BaseModel):
     payer_ids: list[str] = Field(default_factory=list)
@@ -217,6 +224,78 @@ def _dedupe_nonempty(values: list[str]) -> list[str]:
         seen.add(normalized)
         deduped.append(normalized)
     return deduped
+
+
+def _qdrant_status() -> dict[str, Any]:
+    status = {
+        "reachable": False,
+        "collection": os.environ.get("QDRANT_COLLECTION", "policy_chunks"),
+        "points_count": 0,
+    }
+    if qdrant_layer is None:
+        status["error"] = "qdrant client not available"
+        return status
+
+    try:
+        client = qdrant_layer.get_client()
+        count = client.count(
+            collection_name=status["collection"],
+            exact=True,
+        )
+        status["reachable"] = True
+        status["points_count"] = int(getattr(count, "count", 0) or 0)
+        return status
+    except Exception as exc:
+        status["error"] = str(exc)
+        return status
+
+
+def _compact_drug_name(raw: str) -> str:
+    value = (raw or "").strip()
+    if not value:
+        return ""
+    # Prefer bracketed brand/generic alias e.g. "... [Invega]".
+    if "[" in value and "]" in value:
+        inner = value.split("[")[-1].split("]")[0].strip()
+        if inner:
+            return inner
+    # Keep reasonably short names for UI prompts.
+    if len(value) <= 80:
+        return value
+    return value[:77].rstrip() + "..."
+
+
+def _build_live_chat_questions(
+    payers: list[str],
+    drugs: list[str],
+    policies: list[str],
+) -> list[str]:
+    questions: list[str] = []
+
+    if payers and drugs:
+        questions.append(
+            f"Does {payers[0]} cover {drugs[0]} under medical benefit, and what criteria are required?"
+        )
+    if len(payers) >= 2 and drugs:
+        questions.append(
+            f"Compare {drugs[0]} policy requirements between {payers[0]} and {payers[1]}, including prior auth and step therapy."
+        )
+    if policies:
+        questions.append(
+            f'Summarize key criteria in "{policies[0]}" in plain language.'
+        )
+    if payers:
+        questions.append(
+            f"What changed recently in {payers[0]} policy updates that could affect approvals?"
+        )
+    if drugs:
+        questions.append(
+            f"For {drugs[0]}, what documentation is usually required before approval?"
+        )
+
+    # Keep unique, non-empty, ordered.
+    deduped = _dedupe_nonempty(questions)
+    return deduped[:6]
 
 
 def _resolve_retrieval_scope(filters: QueryFilters) -> dict[str, Any]:
@@ -834,6 +913,88 @@ def metadata_policies(_auth: AuthClaims = Depends(require_auth0_token)):
             }
             for row in policies
         ]
+    }
+
+
+@app.get(f"{API_PREFIX}/metadata/chat-hints")
+def metadata_chat_hints(_auth: AuthClaims = Depends(require_auth0_token)):
+    with db_layer.get_conn() as conn:
+        stats = db_layer.fetchone(
+            conn,
+            """
+            SELECT
+              (SELECT COUNT(*)::int FROM payers) AS payer_count,
+              (SELECT COUNT(*)::int FROM policies) AS policy_count,
+              (SELECT COUNT(*)::int FROM policy_versions) AS policy_version_count,
+              (SELECT COUNT(*)::int FROM coverage_rules) AS coverage_rule_count,
+              (SELECT COUNT(*)::int FROM policy_chunks) AS chunk_count
+            """,
+        ) or {}
+
+        payer_rows = db_layer.fetchall(
+            conn,
+            "SELECT name FROM payers ORDER BY name LIMIT 24",
+        )
+        policy_rows = db_layer.fetchall(
+            conn,
+            """
+            SELECT policy_title
+            FROM policies
+            WHERE COALESCE(TRIM(policy_title), '') <> ''
+            ORDER BY created_at DESC
+            LIMIT 24
+            """,
+        )
+        drug_rows = db_layer.fetchall(
+            conn,
+            """
+            SELECT drug_name, COUNT(*)::int AS freq
+            FROM coverage_rules
+            WHERE COALESCE(TRIM(drug_name), '') <> ''
+            GROUP BY drug_name
+            ORDER BY freq DESC, drug_name ASC
+            LIMIT 24
+            """,
+        )
+
+    payers = _dedupe_nonempty([str(row.get("name", "")) for row in payer_rows])
+    policies = _dedupe_nonempty([str(row.get("policy_title", "")) for row in policy_rows])
+    drugs = _dedupe_nonempty([_compact_drug_name(str(row.get("drug_name", ""))) for row in drug_rows])
+
+    qdrant = _qdrant_status()
+    postgres_rule_count = int(stats.get("coverage_rule_count", 0) or 0)
+    qdrant_points = int(qdrant.get("points_count", 0) or 0)
+    use_live_examples = postgres_rule_count > 0 and qdrant.get("reachable", False) and qdrant_points > 0
+
+    live_questions = (
+        _build_live_chat_questions(
+            payers=payers[:6],
+            drugs=drugs[:6],
+            policies=policies[:6],
+        )
+        if use_live_examples
+        else []
+    )
+
+    return {
+        "use_live_examples": use_live_examples,
+        "live_example_questions": live_questions,
+        "demo_example_questions": DEMO_CHAT_QUESTIONS,
+        "live_signals": {
+            "payers": payers[:8],
+            "top_drugs": drugs[:8],
+            "policy_titles": policies[:8],
+        },
+        "data_status": {
+            "postgres": {
+                "payers": int(stats.get("payer_count", 0) or 0),
+                "policies": int(stats.get("policy_count", 0) or 0),
+                "policy_versions": int(stats.get("policy_version_count", 0) or 0),
+                "coverage_rules": int(stats.get("coverage_rule_count", 0) or 0),
+                "chunks": int(stats.get("chunk_count", 0) or 0),
+            },
+            "qdrant": qdrant,
+        },
     }
 
 

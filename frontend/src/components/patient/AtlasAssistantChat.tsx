@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { Bot, Loader2, PhoneCall, Send, Shield, Sparkles, User } from 'lucide-react';
-import { postQuery } from '../../api/client';
+import { getChatHints, postQuery } from '../../api/client';
 import type { QueryResponse } from '../../types';
 import AnswerCard from './AnswerCard';
 import NextSteps from './NextSteps';
@@ -18,7 +18,7 @@ interface ChatTurn {
 
 const ASSISTANT_NAME = 'Atlas';
 const DEFAULT_TWILIO_NUMBER = '+1 (602) 610-0653';
-const SUGGESTIONS = [
+const DEMO_SUGGESTIONS = [
   'Does my plan cover rituximab for rheumatoid arthritis, and what are the criteria?',
   'What prior authorization requirements apply to my treatment and what documents are needed?',
   'What changed in my payer policy this quarter for my drug under medical benefit?',
@@ -34,6 +34,9 @@ export default function AtlasAssistantChat() {
   const [loading, setLoading] = useState(false);
   const [turns, setTurns] = useState<ChatTurn[]>([]);
   const [error, setError] = useState('');
+  const [suggestions, setSuggestions] = useState<string[]>(DEMO_SUGGESTIONS);
+  const [usingDemoSuggestions, setUsingDemoSuggestions] = useState(true);
+  const [suggestionContext, setSuggestionContext] = useState('');
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const twilioNumber = (import.meta.env.VITE_TWILIO_NUMBER as string | undefined)?.trim() || DEFAULT_TWILIO_NUMBER;
@@ -41,6 +44,44 @@ export default function AtlasAssistantChat() {
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [turns, loading]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    void getChatHints()
+      .then(payload => {
+        if (cancelled) return;
+        const liveEnabled = payload.use_live_examples ?? true;
+        const live = liveEnabled ? (payload.live_example_questions || []).filter(Boolean) : [];
+        const demos = (payload.demo_example_questions || []).filter(Boolean);
+        const next = (live.length ? live : demos.length ? demos : DEMO_SUGGESTIONS).slice(0, 6);
+        setSuggestions(next);
+        setUsingDemoSuggestions(live.length === 0 || !liveEnabled);
+
+        const postgresRules = payload.data_status?.postgres?.coverage_rules ?? 0;
+        const postgresPolicies = payload.data_status?.postgres?.policies ?? 0;
+        const qdrantVectors = payload.data_status?.qdrant?.points_count ?? 0;
+        if (liveEnabled && qdrantVectors > 0) {
+          setSuggestionContext(
+            `Live data: ${postgresRules.toLocaleString()} rules, ${postgresPolicies.toLocaleString()} policies, ${qdrantVectors.toLocaleString()} vectors`,
+          );
+        } else {
+          setSuggestionContext(
+            `Using static demo prompts until vector data is available (rules: ${postgresRules.toLocaleString()}, vectors: ${qdrantVectors.toLocaleString()}).`,
+          );
+        }
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setSuggestions(DEMO_SUGGESTIONS);
+        setUsingDemoSuggestions(true);
+        setSuggestionContext('Using static demo prompts because live metadata is unavailable.');
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const latestResponse = useMemo(() => {
     for (let i = turns.length - 1; i >= 0; i -= 1) {
@@ -135,10 +176,12 @@ export default function AtlasAssistantChat() {
                       <Sparkles className="w-7 h-7 text-indigo-700" />
                     </div>
                     <p className="mt-3 text-sm font-semibold text-slate-800">Ask {ASSISTANT_NAME} about medical-benefit policy criteria.</p>
-                    <p className="text-xs text-slate-500 mt-1">Example prompts to start:</p>
+                    <p className="text-xs text-slate-500 mt-1">
+                      {usingDemoSuggestions ? 'Demo prompts (static sample):' : 'Live prompts from your current policy data:'}
+                    </p>
                   </div>
                   <div className="grid gap-2">
-                    {SUGGESTIONS.map(item => (
+                    {suggestions.map(item => (
                       <button
                         key={item}
                         onClick={() => setQuestion(item)}
@@ -148,6 +191,7 @@ export default function AtlasAssistantChat() {
                       </button>
                     ))}
                   </div>
+                  <p className="mt-2 text-[11px] text-slate-500 text-center">{suggestionContext}</p>
                 </div>
               )}
 

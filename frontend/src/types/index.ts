@@ -152,6 +152,32 @@ export interface PlanMetadataResponse {
   plans: MetadataPlan[];
 }
 
+export interface ChatHintsResponse {
+  use_live_examples?: boolean;
+  live_example_questions: string[];
+  demo_example_questions: string[];
+  live_signals: {
+    payers: string[];
+    top_drugs: string[];
+    policy_titles: string[];
+  };
+  data_status: {
+    postgres: {
+      payers: number;
+      policies: number;
+      policy_versions: number;
+      coverage_rules: number;
+      chunks: number;
+    };
+    qdrant: {
+      reachable: boolean;
+      collection: string;
+      points_count: number;
+      error?: string;
+    };
+  };
+}
+
 export interface PolicyVersionMetadata {
   version_id: string;
   version_label: string | null;

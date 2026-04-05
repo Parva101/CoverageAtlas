@@ -55,10 +55,8 @@ try:
 except ImportError:
     PSQL_AVAILABLE = False
 
-DATABASE_URL = os.environ.get(
-    "DATABASE_URL",
-    "postgresql://postgres:postgres@localhost:5432/coverageatlas"
-)
+# Reuse canonical DB config so no ingestion path can silently fall back to localhost.
+DATABASE_URL = db_layer.DATABASE_URL
 
 # ── Qdrant ─────────────────────────────────────────────────────────────────
 try:

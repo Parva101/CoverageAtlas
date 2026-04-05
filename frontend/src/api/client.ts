@@ -11,6 +11,7 @@ import type {
   DocumentStatus,
   VoiceSession,
   PlanMetadataResponse,
+  ChatHintsResponse,
 } from '../types';
 
 const DEFAULT_BASE = '/api/v1';
@@ -99,6 +100,7 @@ export const getAuthMe = () =>
 // Metadata
 export const getPlanMetadata = () => request<PlanMetadataResponse>('/metadata/plans');
 export const getPolicyMetadata = () => request<PoliciesMetadataResponse>('/metadata/policies');
+export const getChatHints = () => request<ChatHintsResponse>('/metadata/chat-hints');
 
 // Query (Q&A)
 export const postQuery = (body: QueryRequest) =>

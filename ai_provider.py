@@ -21,6 +21,7 @@ DEFAULT_EMBEDDING_MODEL = os.environ.get("EMBEDDING_MODEL", "gemini-embedding-00
 DEFAULT_QA_MODEL = os.environ.get("QA_MODEL", "gemini-2.5-flash")
 DEFAULT_EMBEDDING_DIM = int(os.environ.get("EMBEDDING_DIM", "768"))
 _SA_TEMPFILE_PATH: Optional[str] = None
+EMBED_MODEL_FALLBACK = "gemini-embedding-001"
 
 
 def _first_nonempty(*values: Optional[str]) -> str:
@@ -106,6 +107,30 @@ def _prepare_google_credentials(api_key: str) -> None:
             "Set a valid path, or provide GOOGLE_SERVICE_ACCOUNT_JSON, or use "
             "VERTEX_API_KEY/GOOGLE_API_KEY."
         )
+
+
+def _embedding_model_candidates(model: Optional[str]) -> list[str]:
+    requested = (model or DEFAULT_EMBEDDING_MODEL).strip() or DEFAULT_EMBEDDING_MODEL
+    candidates: list[str] = [requested]
+
+    # Legacy Gemini naming variants that often fail on current v1beta embed endpoint.
+    if requested.startswith("models/"):
+        candidates.append(requested.split("/", 1)[1])
+    if requested in {"models/text-embedding-004", "text-embedding-004"}:
+        candidates.append(EMBED_MODEL_FALLBACK)
+
+    if EMBED_MODEL_FALLBACK not in candidates:
+        candidates.append(EMBED_MODEL_FALLBACK)
+
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for cand in candidates:
+        norm = cand.strip()
+        if not norm or norm in seen:
+            continue
+        seen.add(norm)
+        deduped.append(norm)
+    return deduped
 
 
 def _extract_text_from_response(response) -> str:
@@ -210,19 +235,35 @@ def embed_texts(
     if not contents:
         return []
 
-    config_kwargs: dict = {}
-    if task_type:
-        config_kwargs["task_type"] = task_type
-    if output_dimensionality:
-        config_kwargs["output_dimensionality"] = int(output_dimensionality)
-    config = types.EmbedContentConfig(**config_kwargs) if config_kwargs else None
+    last_error: Optional[Exception] = None
+    for candidate_model in _embedding_model_candidates(model):
+        try:
+            config_kwargs: dict = {}
+            if task_type:
+                config_kwargs["task_type"] = task_type
 
-    response = get_client().models.embed_content(
-        model=model or DEFAULT_EMBEDDING_MODEL,
-        contents=contents,
-        config=config,
-    )
-    return _extract_embeddings(response)
+            # Keep vector dimensions aligned with Qdrant defaults even when callers
+            # omit output_dimensionality.
+            candidate_dim = output_dimensionality
+            if candidate_dim is None and candidate_model.startswith("gemini-embedding-"):
+                candidate_dim = DEFAULT_EMBEDDING_DIM
+            if candidate_dim:
+                config_kwargs["output_dimensionality"] = int(candidate_dim)
+
+            config = types.EmbedContentConfig(**config_kwargs) if config_kwargs else None
+            response = get_client().models.embed_content(
+                model=candidate_model,
+                contents=contents,
+                config=config,
+            )
+            return _extract_embeddings(response)
+        except Exception as exc:  # pragma: no cover - provider-dependent runtime behavior
+            last_error = exc
+            continue
+
+    if last_error is not None:
+        raise last_error
+    raise RuntimeError("Embedding request failed without a provider error.")
 
 
 def embed_query(

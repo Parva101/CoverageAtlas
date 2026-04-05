@@ -16,6 +16,8 @@ services:
         sync: false
       - key: GEMINI_PROVIDER
         value: developer
+      - key: AI_USE_VERTEX
+        value: "0"
       - key: GOOGLE_GENAI_USE_VERTEXAI
         value: "false"
       - key: GOOGLE_CLOUD_PROJECT
@@ -27,7 +29,9 @@ services:
       - key: EXTRACT_MODEL
         value: gemini-2.5-flash
       - key: EMBEDDING_MODEL
-        value: models/text-embedding-004
+        value: gemini-embedding-001
+      - key: EMBEDDING_DIM
+        value: "768"
       - key: DATABASE_URL
         sync: false
       - key: QDRANT_URL

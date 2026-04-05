@@ -101,28 +101,28 @@ export default function MascotChatbot() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-cyan-50 via-sky-50/40 to-white">
+    <div className="space-y-6">
       <div className="max-w-7xl mx-auto px-5 py-8 space-y-6">
-        <section className="rounded-3xl border border-cyan-200/70 bg-gradient-to-r from-cyan-600 via-sky-600 to-blue-600 p-6 text-white shadow-[0_20px_60px_-30px_rgba(2,132,199,0.7)]">
-          <div className="grid gap-5 lg:grid-cols-[1.35fr_1fr] items-start">
+        <section className="app-page-hero">
+          <div className="app-page-hero-content grid gap-5 lg:grid-cols-[1.35fr_1fr] items-start">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.12em] text-cyan-100">Mascot Assistant</p>
+              <p className="text-xs font-semibold uppercase tracking-[0.12em] text-sky-100">Mascot Assistant</p>
               <h1 className="mt-2 text-3xl font-semibold">{MASCOT_NAME} AI Concierge</h1>
-              <p className="mt-2 text-sm text-cyan-100 max-w-2xl">
+              <p className="mt-2 text-sm text-sky-100 max-w-2xl">
                 Ask policy questions in natural language, get evidence-backed answers, and switch to voice instantly when you want to talk on a real call.
               </p>
               <div className="mt-4 flex flex-wrap gap-2 text-xs">
-                <span className="rounded-full border border-white/30 bg-white/10 px-3 py-1">RAG-powered answers</span>
-                <span className="rounded-full border border-white/30 bg-white/10 px-3 py-1">Evidence and confidence</span>
-                <span className="rounded-full border border-white/30 bg-white/10 px-3 py-1">Voice fallback with Twilio</span>
+                <span className="app-page-hero-chip">RAG-powered answers</span>
+                <span className="app-page-hero-chip">Evidence and confidence</span>
+                <span className="app-page-hero-chip">Voice fallback with Twilio</span>
               </div>
             </div>
-            <div className="rounded-2xl border border-white/25 bg-white/10 p-4 space-y-3">
+            <div className="app-page-hero-stat space-y-3">
               <div className="flex items-center gap-2">
-                <PhoneCall className="w-4 h-4 text-cyan-100" />
+                <PhoneCall className="w-4 h-4 text-sky-100" />
                 <p className="text-sm font-semibold">Talk to {MASCOT_NAME} on call</p>
               </div>
-              <p className="text-xs text-cyan-100">Prefer voice? Call the Twilio number and continue the same assistant experience by phone.</p>
+              <p className="text-xs text-sky-100">Prefer voice? Call the Twilio number and continue the same assistant experience by phone.</p>
               <a
                 href={`tel:${toTel(twilioNumber)}`}
                 className="inline-flex items-center gap-2 rounded-xl bg-white text-sky-700 px-3.5 py-2 text-sm font-semibold hover:bg-cyan-50 transition-colors"
@@ -130,16 +130,16 @@ export default function MascotChatbot() {
                 <PhoneCall className="w-4 h-4" />
                 {twilioNumber}
               </a>
-              <p className="text-[11px] text-cyan-100">If this is a laptop demo, show this number as the “call Atlas now” action.</p>
+              <p className="text-[11px] text-sky-100">If this is a laptop demo, show this number as the "call Atlas now" action.</p>
             </div>
           </div>
         </section>
 
         <div className="grid gap-5 xl:grid-cols-[1.15fr_0.85fr]">
-          <section className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-            <div className="border-b border-slate-100 bg-slate-50/80 px-4 py-3 flex flex-wrap gap-3 items-center justify-between">
+          <section className="app-chat-shell">
+            <div className="app-chat-strip border-b flex flex-wrap gap-3 items-center justify-between">
               <div className="flex items-center gap-2">
-                <div className="w-9 h-9 rounded-xl bg-cyan-100 flex items-center justify-center">
+                <div className="w-9 h-9 rounded-xl bg-cyan-100/85 flex items-center justify-center ring-1 ring-cyan-200/65">
                   <Bot className="w-5 h-5 text-cyan-700" />
                 </div>
                 <div>
@@ -152,7 +152,7 @@ export default function MascotChatbot() {
                 <select
                   value={payerId}
                   onChange={event => setPayerId(event.target.value)}
-                  className="w-full px-3 py-2 border border-slate-200 rounded-xl text-xs bg-white focus:outline-none focus:ring-2 focus:ring-cyan-500"
+                  className="app-input py-2 text-xs"
                   disabled={loadingMetadata}
                 >
                   <option value="">All plans</option>
@@ -166,7 +166,7 @@ export default function MascotChatbot() {
               </div>
             </div>
 
-            <div className="p-4 h-[30rem] overflow-y-auto space-y-4">
+            <div className="app-chat-body p-4 h-[30rem] overflow-y-auto space-y-4">
               {turns.length === 0 && (
                 <div className="h-full flex flex-col justify-center">
                   <div className="text-center mb-5">
@@ -181,7 +181,7 @@ export default function MascotChatbot() {
                       <button
                         key={item}
                         onClick={() => setQuestion(item)}
-                        className="text-left px-3 py-2.5 rounded-xl border border-slate-200 bg-white text-xs text-slate-700 hover:border-cyan-300 hover:bg-cyan-50/60 transition-colors"
+                        className="app-chat-suggestion"
                       >
                         {item}
                       </button>
@@ -203,7 +203,7 @@ export default function MascotChatbot() {
                   </div>
 
                   <div className="flex justify-start">
-                    <div className="max-w-[90%] rounded-2xl rounded-bl-sm border border-slate-200 bg-slate-50 px-3.5 py-3 text-sm text-slate-700">
+                    <div className="app-chat-assistant">
                       <div className="flex items-center gap-2 mb-1.5">
                         <Shield className="w-3.5 h-3.5 text-cyan-700" />
                         <span className="text-[11px] uppercase tracking-wide text-slate-500">{MASCOT_NAME}</span>
@@ -231,7 +231,7 @@ export default function MascotChatbot() {
               <div ref={bottomRef} />
             </div>
 
-            <div className="border-t border-slate-100 p-3 bg-slate-50/70">
+            <div className="app-chat-strip border-t">
               <div className="flex gap-2">
                 <textarea
                   value={question}
@@ -244,12 +244,12 @@ export default function MascotChatbot() {
                   }}
                   placeholder={`Ask ${MASCOT_NAME} about policy coverage, prior auth, denials...`}
                   rows={2}
-                  className="flex-1 px-3 py-2.5 border border-slate-200 rounded-xl text-sm bg-white resize-none focus:outline-none focus:ring-2 focus:ring-cyan-500"
+                  className="app-input flex-1 py-2.5 text-sm resize-none"
                 />
                 <button
                   onClick={() => void handleSend()}
                   disabled={loading || !question.trim()}
-                  className="w-11 h-11 rounded-xl bg-cyan-600 text-white hover:bg-cyan-700 disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center transition-colors"
+                  className="w-11 h-11 rounded-xl bg-cyan-600 text-white hover:bg-cyan-700 disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center transition-colors shadow-md shadow-cyan-600/25"
                 >
                   <Send className="w-4 h-4" />
                 </button>
@@ -271,7 +271,7 @@ export default function MascotChatbot() {
                 <TermHelper />
               </>
             ) : (
-              <div className="bg-white rounded-2xl border border-slate-200 p-5 text-sm text-slate-500">
+              <div className="app-chat-empty-panel">
                 Ask a question to see confidence, evidence quality, coach suggestions, and next steps.
               </div>
             )}

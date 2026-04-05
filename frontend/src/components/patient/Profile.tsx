@@ -92,9 +92,10 @@ export default function Profile() {
           };
           void updateMyProfile(syncPayload).catch(() => undefined);
         }
-      } catch {
+      } catch (e: unknown) {
         if (!mounted) return;
-        setError('Unable to load profile details right now.');
+        const message = e instanceof Error ? e.message : 'Unable to load profile details right now.';
+        setError(message);
       } finally {
         if (mounted) setLoading(false);
       }
@@ -200,7 +201,7 @@ export default function Profile() {
     }
   };
 
-  if (loading || !form) {
+  if (loading) {
     return (
       <div className="app-surface py-12 text-center">
         <Loader2 className="mx-auto h-8 w-8 animate-spin text-blue-600" />
@@ -209,14 +210,28 @@ export default function Profile() {
     );
   }
 
+  if (!form) {
+    return (
+      <div className="app-surface space-y-3 border-red-200 bg-red-50/70 p-6 text-center">
+        <p className="text-sm font-medium text-red-800">We could not load your profile.</p>
+        <p className="text-xs text-red-700">{error || 'Please check auth/backend connectivity and try again.'}</p>
+        <button onClick={() => window.location.reload()} className="app-button-secondary">
+          Retry
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
-      <section className="app-surface border-cyan-100/90 bg-gradient-to-r from-cyan-600 to-teal-600 p-7 text-white">
-        <p className="text-xs font-semibold uppercase tracking-[0.15em] text-cyan-100">Personal Workspace</p>
-        <h1 className="mt-2 text-3xl font-semibold">Your Profile</h1>
-        <p className="mt-2 max-w-2xl text-sm leading-relaxed text-cyan-100">
-          Each user keeps their own profile, plan context, and care preferences so responses stay relevant and personal.
-        </p>
+      <section className="app-page-hero">
+        <div className="app-page-hero-content">
+          <p className="text-xs font-semibold uppercase tracking-[0.15em] text-sky-100">Personal Workspace</p>
+          <h1 className="mt-2 text-3xl font-semibold">Your Profile</h1>
+          <p className="mt-2 max-w-2xl text-sm leading-relaxed text-sky-100">
+            Each user keeps their own profile, plan context, and care preferences so responses stay relevant and personal.
+          </p>
+        </div>
       </section>
 
       <section className="grid gap-4 lg:grid-cols-[1.2fr_1fr]">

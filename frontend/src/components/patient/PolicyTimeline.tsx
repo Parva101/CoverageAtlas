@@ -253,12 +253,14 @@ export default function PolicyTimeline() {
 
   return (
     <div className="space-y-6">
-      <section className="app-surface border-indigo-100/90 bg-gradient-to-r from-indigo-600 to-blue-600 p-7 text-white">
-        <p className="text-xs font-semibold uppercase tracking-[0.15em] text-indigo-100">Patch Notes</p>
-        <h1 className="mt-2 text-3xl font-semibold">Policy Update Timeline</h1>
-        <p className="mt-2 max-w-2xl text-sm leading-relaxed text-indigo-100">
-          See policy changes in an update-feed style experience, then run deep version-to-version comparisons below.
-        </p>
+      <section className="app-page-hero">
+        <div className="app-page-hero-content">
+          <p className="text-xs font-semibold uppercase tracking-[0.15em] text-sky-100">Patch Notes</p>
+          <h1 className="mt-2 text-3xl font-semibold">Policy Update Timeline</h1>
+          <p className="mt-2 max-w-2xl text-sm leading-relaxed text-sky-100">
+            See policy changes in an update-feed style experience, then run deep version-to-version comparisons below.
+          </p>
+        </div>
       </section>
 
       <section className="app-surface space-y-4 p-6">

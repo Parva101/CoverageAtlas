@@ -10,7 +10,21 @@ services:
     envVars:
       - key: GEMINI_API_KEY
         sync: false
+      - key: GOOGLE_API_KEY
+        sync: false
+      - key: VERTEX_API_KEY
+        sync: false
+      - key: GEMINI_PROVIDER
+        value: developer
+      - key: GOOGLE_GENAI_USE_VERTEXAI
+        value: "false"
+      - key: GOOGLE_CLOUD_PROJECT
+        sync: false
+      - key: GOOGLE_CLOUD_LOCATION
+        value: us-central1
       - key: QA_MODEL
+        value: gemini-2.5-flash
+      - key: EXTRACT_MODEL
         value: gemini-2.5-flash
       - key: EMBEDDING_MODEL
         value: models/text-embedding-004
@@ -27,14 +41,22 @@ services:
       - key: AUTH0_ENABLED
         value: "true"
       - key: AUTH0_DOMAIN
-        sync: false
+        value: dev-7diyk2mt2vpsivvx.us.auth0.com
       - key: AUTH0_AUDIENCE
-        sync: false
+        value: https://dev-7diyk2mt2vpsivvx.us.auth0.com/api/v2/
       - key: AUTH0_CLIENT_ID
-        sync: false
+        value: gS305nRmTUWZufcoGNPzi6a9fx5N7C8T
+      - key: AUTH0_ISSUER
+        value: ""
+      - key: AUTH0_ADMIN_SCOPE
+        value: admin:write
+      - key: AUTH0_JWKS_CACHE_TTL_SECONDS
+        value: "3600"
       - key: AUTH0_SCOPE
         value: openid profile email
       - key: AUTH0_CACHE_LOCATION
         value: localstorage
       - key: AUTH0_USE_REFRESH_TOKENS
         value: "true"
+      - key: ELEVENLABS_API_KEY
+        sync: false

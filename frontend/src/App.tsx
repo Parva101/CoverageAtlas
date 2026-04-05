@@ -3,6 +3,9 @@ import Layout from './components/Layout';
 import AskQuestion from './components/patient/AskQuestion';
 import ComparePlans from './components/patient/ComparePlans';
 import VoiceCall from './components/patient/VoiceCall';
+import AccessLab from './components/patient/AccessLab';
+import PolicyTimeline from './components/patient/PolicyTimeline';
+import Profile from './components/patient/Profile';
 import ProtectedRoute from './components/ProtectedRoute';
 import AuthPage from './pages/AuthPage';
 
@@ -36,8 +39,11 @@ export default function App() {
         }
       >
         <Route path="/ask" element={<AskQuestion />} />
+        <Route path="/access-lab" element={<AccessLab />} />
         <Route path="/compare" element={<ComparePlans />} />
         <Route path="/voice" element={<VoiceCall />} />
+        <Route path="/changes" element={<PolicyTimeline />} />
+        <Route path="/profile" element={<Profile />} />
       </Route>
       <Route path="/" element={<RootEntry />} />
       <Route path="*" element={<Navigate to="/ask" replace />} />

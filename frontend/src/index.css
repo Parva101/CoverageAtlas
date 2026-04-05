@@ -1,17 +1,146 @@
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  --font-body: 'Plus Jakarta Sans', 'Segoe UI', sans-serif;
+  --font-heading: 'Space Grotesk', 'Plus Jakarta Sans', sans-serif;
+
+  --bg-main: #060b1f;
+  --bg-elevated: #ffffff;
+  --bg-soft: #dbeafe;
+  --border-soft: #bfdbfe;
+
+  --text-main: #e2e8f0;
+  --text-muted: #a3b2c7;
+  --brand-500: #4f46e5;
+  --brand-600: #4338ca;
+  --accent-500: #06b6d4;
+  --warn-500: #f59e0b;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
 body {
   margin: 0;
-  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  min-height: 100vh;
+  font-family: var(--font-body);
+  color: var(--text-main);
   -webkit-font-smoothing: antialiased;
-  background: #f8fafc;
-  color: #0f172a;
+  background:
+    radial-gradient(circle at 8% 6%, rgb(79 70 229 / 34%), transparent 36%),
+    radial-gradient(circle at 92% 10%, rgb(6 182 212 / 26%), transparent 34%),
+    radial-gradient(circle at 48% 98%, rgb(99 102 241 / 20%), transparent 40%),
+    linear-gradient(165deg, #020617 0%, var(--bg-main) 38%, #0b1023 100%);
+  background-attachment: fixed;
+  position: relative;
 }
 
 #root {
   min-height: 100vh;
+  position: relative;
+  z-index: 1;
+}
+
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(rgb(148 163 184 / 5%) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(148 163 184 / 5%) 1px, transparent 1px);
+  background-size: 44px 44px;
+  mask-image: radial-gradient(circle at 50% 20%, black 35%, transparent 82%);
+}
+
+@layer base {
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    font-family: var(--font-heading);
+    letter-spacing: -0.01em;
+  }
+
+  ::selection {
+    background: rgb(99 102 241 / 24%);
+    color: #f8fafc;
+  }
+}
+
+@layer components {
+  .app-surface {
+    @apply rounded-2xl border border-white/20 bg-white/[0.93] shadow-[0_14px_36px_-24px_rgba(37,99,235,0.55)] backdrop-blur-md;
+  }
+
+  .app-input {
+    @apply w-full rounded-xl border border-slate-200/85 bg-white px-4 py-3 text-sm text-slate-800 outline-none transition-all duration-200 placeholder:text-slate-400 focus:border-indigo-500 focus:ring-4 focus:ring-indigo-100;
+  }
+
+  .app-button-primary {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-indigo-600 to-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-[0_8px_24px_-14px_rgba(79,70,229,0.95)] transition hover:from-indigo-500 hover:to-blue-500 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-55;
+  }
+
+  .app-button-secondary {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200/90 bg-white px-3.5 py-2 text-sm font-medium text-slate-700 transition hover:border-indigo-200 hover:bg-indigo-50/60;
+  }
+
+  .app-chip {
+    @apply rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 transition hover:border-indigo-200 hover:bg-indigo-50/60;
+  }
+
+  .app-chip-active {
+    @apply border-indigo-200 bg-indigo-50 text-indigo-700;
+  }
+
+  .app-sidebar-shell {
+    @apply border-r border-white/10 bg-slate-950/85 text-slate-100 backdrop-blur-xl;
+  }
+
+  .app-sidebar-card {
+    @apply rounded-2xl border border-slate-800 bg-slate-900/90 shadow-[0_10px_26px_-20px_rgba(14,165,233,0.65)];
+  }
+}
+
+@keyframes float-soft {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+
+  50% {
+    transform: translateY(-4px);
+  }
+}
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-float-soft {
+  animation: float-soft 4s ease-in-out infinite;
+}
+
+.animate-fade-up {
+  animation: fade-up 320ms ease-out both;
 }
 
 @keyframes fadeInUp {

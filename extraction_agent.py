@@ -30,40 +30,15 @@ from datetime import datetime, date
 from typing import Optional
 
 import db as db_layer
+from gemini_client import embed_texts, generate_text
 try:
     import qdrant_setup as qdrant_layer
 except ImportError:
     qdrant_layer = None
 
 # ── Gemini ─────────────────────────────────────────────────────────────────
-import requests as _requests
-
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
-EXTRACT_MODEL  = os.environ.get("EXTRACT_MODEL", "gemini-2.5-flash")
-EMBED_MODEL    = "models/gemini-embedding-001"
-VECTOR_DIM     = 768
-
-_TASK_TYPE_MAP = {
-    "retrieval_document": "RETRIEVAL_DOCUMENT",
-    "retrieval_query":    "RETRIEVAL_QUERY",
-}
-
-
-def _embed_texts(texts: list[str], task_type: str = "retrieval_document") -> list[list[float]]:
-    task = _TASK_TYPE_MAP.get(task_type, "RETRIEVAL_DOCUMENT")
-    url = f"https://generativelanguage.googleapis.com/v1beta/{EMBED_MODEL}:embedContent?key={GEMINI_API_KEY}"
-    vectors = []
-    for t in texts:
-        payload = {
-            "model": EMBED_MODEL,
-            "content": {"parts": [{"text": t}]},
-            "taskType": task,
-            "outputDimensionality": VECTOR_DIM,
-        }
-        resp = _requests.post(url, json=payload, timeout=30)
-        resp.raise_for_status()
-        vectors.append(resp.json()["embedding"]["values"])
-    return vectors
+EXTRACT_MODEL = "gemini-1.5-pro"
+EMBED_MODEL   = "models/text-embedding-004"
 
 # ── PostgreSQL ─────────────────────────────────────────────────────────────
 try:
@@ -150,9 +125,7 @@ For EACH drug/treatment, output a JSON object with EXACTLY these fields:
 
 Rules:
 - Extract ALL drugs/treatments mentioned, even if only briefly.
-- If a field is genuinely unknown, use null — but always try to infer from context first.
-- coverage_status: infer from context — if the policy describes criteria/requirements for approval, use "restricted"; if it says something is covered without conditions, use "covered"; if explicitly excluded or denied, use "not_covered"; only use "unknown" if there is truly no signal.
-- prior_auth_required: if criteria or approval steps are mentioned, set true even if not explicitly stated.
+- If a field is genuinely unknown, use null — do NOT guess.
 - coverage_status MUST be one of the four allowed values.
 - criteria_summary should be plain-language bullets a non-expert can understand.
 - confidence: 0.9+ if clearly stated, 0.7 if implied, 0.5 if uncertain, lower if very ambiguous.
@@ -160,6 +133,8 @@ Rules:
 - Output ONLY a JSON array [...] — no markdown, no preamble.
 
 POLICY TEXT:
+\"\"\"
+{chunk_text}
 \"\"\"
 """
 
@@ -182,12 +157,7 @@ def extract_text_from_pdf(path: Path) -> list[dict]:
     """Returns list of {page_num, text} dicts."""
     pages = []
     if PDF_LIB == "pdfplumber":
-        try:
-            pdf_cm = pdfplumber.open(path)
-        except Exception as e:
-            log.warning(f"  Cannot open PDF (skipping): {e}")
-            return []
-        with pdf_cm as pdf:
+        with pdfplumber.open(path) as pdf:
             for i, page in enumerate(pdf.pages, 1):
                 t = page.extract_text() or ""
                 if t.strip():
@@ -290,20 +260,15 @@ def split_into_sections(pages: list[dict], max_chars: int = 3000) -> list[dict]:
 
 def call_gemini_extractor(chunk_text: str, retries: int = 3) -> list[dict]:
     """Calls Gemini to extract coverage_rules from a text chunk."""
-    prompt = EXTRACTION_PROMPT + chunk_text[:4000] + '\n"""'  # noqa: implicit concat
-    url = (
-        f"https://generativelanguage.googleapis.com/v1beta/models/{EXTRACT_MODEL}"
-        f":generateContent?key={GEMINI_API_KEY}"
-    )
-
+    prompt = EXTRACTION_PROMPT.format(chunk_text=chunk_text[:4000])
     for attempt in range(retries):
         try:
-            resp = _requests.post(url, json={
-                "contents": [{"parts": [{"text": prompt}]}],
-                "generationConfig": {"temperature": 0.0, "maxOutputTokens": 8192},
-            }, timeout=60)
-            resp.raise_for_status()
-            raw = resp.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+            raw = generate_text(
+                prompt=prompt,
+                model=EXTRACT_MODEL,
+                temperature=0.0,      # deterministic extraction
+                max_output_tokens=4096,
+            ).strip()
 
             # Strip markdown fences if present
             raw = re.sub(r'^```(?:json)?\s*', '', raw, flags=re.MULTILINE)
@@ -319,7 +284,7 @@ def call_gemini_extractor(chunk_text: str, retries: int = 3) -> list[dict]:
             log.warning(f"  JSON parse error (attempt {attempt+1}): {e}")
             time.sleep(2 ** attempt)
         except Exception as e:
-            log.warning(f"  LLM error (attempt {attempt+1}): {e}")
+            log.warning(f"  Gemini error (attempt {attempt+1}): {e}")
             time.sleep(2 ** attempt)
 
     return []
@@ -570,7 +535,11 @@ def get_qdrant() -> Optional["QdrantClient"]:
 
 
 def embed_batch(texts: list[str]) -> list[list[float]]:
-    return _embed_texts(texts, task_type="retrieval_document")
+    return embed_texts(
+        texts=texts,
+        model=EMBED_MODEL,
+        task_type="retrieval_document",
+    )
 
 
 def upsert_chunks_to_qdrant(client, sections: list[dict],
@@ -792,8 +761,6 @@ def process_document(
     all_rules = []
     for i, section in enumerate(sections):
         log.info(f"  [{i + 1}/{len(sections)}] Extracting: {section['section_title'][:50]}")
-        if i > 0:
-            time.sleep(2)  # small delay to stay under Groq free-tier TPM limit
         raw_rules = call_gemini_extractor(section["text"])
         if not raw_rules:
             continue

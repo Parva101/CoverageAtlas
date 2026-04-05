@@ -35,41 +35,15 @@ from qdrant_client.models import (
     SearchRequest,
 )
 
-# ── Gemini embeddings ───────────────────────────────────────────────────────
-import requests as _requests
+# ── Gemini (for smoke test) ─────────────────────────────────────────────────
+from gemini_client import embed_text
 
-GEMINI_API_KEY    = os.environ.get("GEMINI_API_KEY", "")
 QDRANT_URL        = os.environ.get("QDRANT_URL",        "http://localhost:6333")
 QDRANT_API_KEY    = os.environ.get("QDRANT_API_KEY",    "")
 QDRANT_COLLECTION = os.environ.get("QDRANT_COLLECTION", "policy_chunks")
 
-VECTOR_DIM     = 768
-EMBED_MODEL    = "models/gemini-embedding-001"
-
-_TASK_TYPE_MAP = {
-    "retrieval_document": "RETRIEVAL_DOCUMENT",
-    "retrieval_query":    "RETRIEVAL_QUERY",
-}
-
-
-def _embed(texts, task_type="retrieval_document") -> list[list[float]]:
-    """Embed texts via Gemini embedContent REST endpoint."""
-    if isinstance(texts, str):
-        texts = [texts]
-    task = _TASK_TYPE_MAP.get(task_type, "RETRIEVAL_DOCUMENT")
-    url = f"https://generativelanguage.googleapis.com/v1beta/{EMBED_MODEL}:embedContent?key={GEMINI_API_KEY}"
-    vectors = []
-    for t in texts:
-        payload = {
-            "model": EMBED_MODEL,
-            "content": {"parts": [{"text": t}]},
-            "taskType": task,
-            "outputDimensionality": VECTOR_DIM,
-        }
-        resp = _requests.post(url, json=payload, timeout=30)
-        resp.raise_for_status()
-        vectors.append(resp.json()["embedding"]["values"])
-    return vectors
+# Gemini text-embedding-004 produces 768-dim vectors
+VECTOR_DIM = 768
 
 logging.basicConfig(
     level=logging.INFO,
@@ -355,7 +329,11 @@ def smoke_test(client: QdrantClient):
         "Step therapy applies: must have tried metformin first."
     )
 
-    vector = _embed([sample_text], task_type="retrieval_document")[0]
+    vector = embed_text(
+        text=sample_text,
+        model="models/text-embedding-004",
+        task_type="retrieval_document",
+    )
 
     test_id = upsert_chunks(
         client,
@@ -379,7 +357,11 @@ def smoke_test(client: QdrantClient):
     )
 
     # Now search for it
-    query_vector = _embed(["Does UHC cover Ozempic for diabetes?"], task_type="retrieval_query")[0]
+    query_vector = embed_text(
+        text="Does UHC cover Ozempic for diabetes?",
+        model="models/text-embedding-004",
+        task_type="retrieval_query",
+    )
 
     hits = search(client, query_vector, top_k=3)
     log.info(f"Search returned {len(hits)} results")

@@ -8,6 +8,10 @@ psycopg2-binary==2.9.9
 # Vector DB
 qdrant-client==1.9.1
 
+# AI / Embeddings
+google-generativeai==0.7.2
+google-genai==1.70.0
+
 # PDF parsing
 pdfplumber==0.11.0
 

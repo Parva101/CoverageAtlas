@@ -17,10 +17,10 @@ ROOT_DIR = Path(__file__).resolve().parents[2]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-import requests as _requests
 import db as db_layer
 import extraction_agent
 from backend.app.auth import AuthClaims, extract_scopes, is_auth_enabled, require_admin_auth, require_auth0_token
+from gemini_client import embed_text, generate_text
 try:
     import qdrant_setup as qdrant_layer
 except ImportError:
@@ -31,9 +31,8 @@ API_PREFIX = "/api/v1"
 UPLOAD_DIR = ROOT_DIR / "data" / "uploads"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
-QA_MODEL       = os.environ.get("QA_MODEL", "gemini-2.5-flash")
-EMBED_MODEL    = "models/gemini-embedding-001"
+EMBED_MODEL = os.environ.get("EMBEDDING_MODEL", "models/text-embedding-004")
+QA_MODEL = os.environ.get("QA_MODEL", "gemini-1.5-pro")
 
 SOURCE_SCAN_RUNS: dict[str, dict[str, Any]] = {}
 
@@ -83,6 +82,21 @@ class VoiceEndRequest(BaseModel):
     summary: Optional[str] = None
 
 
+class ProfileUpdateRequest(BaseModel):
+    full_name: Optional[str] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    date_of_birth: Optional[str] = None
+    state: Optional[str] = None
+    member_id: Optional[str] = None
+    preferred_language: Optional[str] = None
+    preferred_channel: Optional[str] = None
+    primary_plan_id: Optional[str] = None
+    chronic_conditions: list[str] = Field(default_factory=list)
+    medications: list[str] = Field(default_factory=list)
+    notes: Optional[str] = None
+
+
 def error_response(status_code: int, code: str, message: str, details: Optional[dict] = None) -> JSONResponse:
     return JSONResponse(
         status_code=status_code,
@@ -119,6 +133,14 @@ def normalize_json(value: Any, default: Any) -> Any:
     return default
 
 
+def iso_or_none(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    if isinstance(value, (date, datetime)):
+        return value.isoformat()
+    return str(value)
+
+
 def effective_date_passes(row_effective_date: Any, requested_effective_on: Optional[str]) -> bool:
     if not requested_effective_on:
         return True
@@ -142,20 +164,12 @@ def _version_label(effective_date_value: Optional[str]) -> str:
     return f"v{date.today().isoformat()}"
 
 
-VECTOR_DIM = 768
-
-
 def _embedding(question: str) -> list[float]:
-    url = f"https://generativelanguage.googleapis.com/v1beta/{EMBED_MODEL}:embedContent?key={GEMINI_API_KEY}"
-    payload = {
-        "model": EMBED_MODEL,
-        "content": {"parts": [{"text": question}]},
-        "taskType": "RETRIEVAL_QUERY",
-        "outputDimensionality": VECTOR_DIM,
-    }
-    resp = _requests.post(url, json=payload, timeout=30)
-    resp.raise_for_status()
-    return resp.json()["embedding"]["values"]
+    return embed_text(
+        text=question,
+        model=EMBED_MODEL,
+        task_type="retrieval_query",
+    )
 
 
 def _dedupe_nonempty(values: list[str]) -> list[str]:
@@ -342,7 +356,7 @@ def build_citations(chunks: list[dict]) -> list[dict]:
         with db_layer.get_conn() as conn:
             rows = db_layer.fetchall(
                 conn,
-                "SELECT id::text, document_id::text FROM policy_versions WHERE id::text = ANY(%s)",
+                "SELECT id, document_id FROM policy_versions WHERE id = ANY(%s)",
                 (version_ids,),
             )
             for row in rows:
@@ -386,13 +400,13 @@ def build_answer(question: str, chunks: list[dict], citations: list[dict]) -> tu
         f"Evidence:\n{context}\n"
     )
 
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{QA_MODEL}:generateContent?key={GEMINI_API_KEY}"
-    resp = _requests.post(url, json={
-        "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {"temperature": 0.0, "maxOutputTokens": 1024},
-    }, timeout=60)
-    resp.raise_for_status()
-    text = (resp.json()["candidates"][0]["content"]["parts"][0]["text"] or "").strip() or "Insufficient evidence to answer from retrieved policy text."
+    text = (
+        generate_text(
+            prompt=prompt,
+            model=QA_MODEL,
+        ).strip()
+        or "Insufficient evidence to answer from retrieved policy text."
+    )
 
     avg_relevance = sum(c.get("relevance", 0) for c in chunks) / max(1, len(chunks))
     citation_factor = min(1.0, len(citations) / 4.0)
@@ -495,6 +509,64 @@ def auth_me(claims: AuthClaims = Depends(require_auth0_token)):
     }
 
 
+@app.get(f"{API_PREFIX}/profile/me")
+def profile_me(claims: AuthClaims = Depends(require_auth0_token)):
+    user_id = _resolve_request_user_id(claims)
+    with db_layer.get_conn() as conn:
+        profile = db_layer.get_user_profile(conn, user_id)
+
+    if profile is None:
+        profile = {
+            "user_id": user_id,
+            "full_name": claims.get("name"),
+            "email": claims.get("email"),
+            "phone": None,
+            "date_of_birth": None,
+            "state": None,
+            "member_id": None,
+            "preferred_language": None,
+            "preferred_channel": "web",
+            "primary_plan_id": None,
+            "chronic_conditions": [],
+            "medications": [],
+            "notes": None,
+            "created_at": None,
+            "updated_at": None,
+        }
+    else:
+        if not profile.get("email") and claims.get("email"):
+            profile["email"] = claims.get("email")
+        if not profile.get("full_name") and claims.get("name"):
+            profile["full_name"] = claims.get("name")
+
+    return {"profile": profile}
+
+
+@app.put(f"{API_PREFIX}/profile/me")
+def profile_update(
+    req: ProfileUpdateRequest,
+    claims: AuthClaims = Depends(require_auth0_token),
+):
+    user_id = _resolve_request_user_id(claims)
+    payload = req.model_dump()
+    preferred_channel = payload.get("preferred_channel")
+    if preferred_channel and preferred_channel not in {"web", "voice", "email"}:
+        return error_response(
+            400,
+            "VALIDATION_ERROR",
+            "preferred_channel must be one of: web, voice, email",
+            {"preferred_channel": preferred_channel},
+        )
+    if not payload.get("email") and claims.get("email"):
+        payload["email"] = str(claims.get("email"))
+    if not payload.get("full_name") and claims.get("name"):
+        payload["full_name"] = str(claims.get("name"))
+
+    with db_layer.get_conn() as conn:
+        profile = db_layer.upsert_user_profile(conn, user_id=user_id, profile=payload)
+    return {"profile": profile}
+
+
 @app.get(f"{API_PREFIX}/metadata/plans")
 def metadata_plans(_auth: AuthClaims = Depends(require_auth0_token)):
     with db_layer.get_conn() as conn:
@@ -537,6 +609,35 @@ def metadata_plans(_auth: AuthClaims = Depends(require_auth0_token)):
             }
             for row in plans
         ],
+    }
+
+
+@app.get(f"{API_PREFIX}/metadata/policies")
+def metadata_policies(_auth: AuthClaims = Depends(require_auth0_token)):
+    with db_layer.get_conn() as conn:
+        policies = db_layer.list_policies_with_versions(conn)
+
+    return {
+        "policies": [
+            {
+                "policy_id": str(row["policy_id"]),
+                "payer_id": str(row["payer_id"]),
+                "payer_name": row["payer_name"],
+                "policy_title": row["policy_title"],
+                "policy_category": row.get("policy_category"),
+                "versions": [
+                    {
+                        "version_id": str(v["version_id"]),
+                        "version_label": v.get("version_label"),
+                        "effective_date": iso_or_none(v.get("effective_date")),
+                        "published_date": iso_or_none(v.get("published_date")),
+                        "is_current": bool(v.get("is_current", False)),
+                    }
+                    for v in row.get("versions", [])
+                ],
+            }
+            for row in policies
+        ]
     }
 
 
@@ -774,6 +875,49 @@ def policy_changes(
         "from_version": from_version["version_label"],
         "to_version": to_version["version_label"],
         "changes": formatted,
+    }
+
+
+@app.get(f"{API_PREFIX}/policies/changes/recent")
+def policy_changes_recent(
+    limit: int = Query(30, ge=1, le=200),
+    policy_id: Optional[str] = None,
+    _auth: AuthClaims = Depends(require_auth0_token),
+):
+    with db_layer.get_conn() as conn:
+        if policy_id:
+            rows = db_layer.fetchall(
+                conn,
+                """
+                SELECT *
+                FROM v_recent_changes
+                WHERE policy_id::text = %s
+                ORDER BY detected_at DESC
+                LIMIT %s
+                """,
+                (policy_id, limit),
+            )
+        else:
+            rows = db_layer.get_recent_changes(conn, limit)
+
+    return {
+        "changes": [
+            {
+                "id": str(row["id"]),
+                "policy_id": str(row["policy_id"]),
+                "payer_name": row.get("payer_name"),
+                "policy_title": row.get("policy_title"),
+                "from_version": row.get("from_version"),
+                "to_version": row.get("to_version"),
+                "change_type": row.get("change_type"),
+                "field_name": row.get("field_name"),
+                "old_value": row.get("old_value"),
+                "new_value": row.get("new_value"),
+                "citations": normalize_json(row.get("citations"), []),
+                "detected_at": iso_or_none(row.get("detected_at")),
+            }
+            for row in rows
+        ]
     }
 
 

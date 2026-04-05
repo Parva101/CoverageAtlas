@@ -2,7 +2,10 @@ import { NavLink, Outlet } from 'react-router-dom';
 import {
   MessageCircle,
   GitCompareArrows,
+  FlaskConical,
   Phone,
+  Clock3,
+  UserRound,
   Shield,
 } from 'lucide-react';
 import AuthPanel from './AuthPanel';
@@ -10,8 +13,11 @@ import ProfileButton from './ProfileButton';
 
 const nav = [
   { to: '/ask', label: 'Ask a Question', icon: MessageCircle, description: 'Check your coverage' },
+  { to: '/access-lab', label: 'Access Lab', icon: FlaskConical, description: 'Plan switch and denial strategy' },
   { to: '/compare', label: 'Compare Plans', icon: GitCompareArrows, description: 'Find the best plan' },
   { to: '/voice', label: 'Voice Assistant', icon: Phone, description: 'Chat about coverage' },
+  { to: '/changes', label: 'Policy Timeline', icon: Clock3, description: 'Track policy changes over time' },
+  { to: '/profile', label: 'My Profile', icon: UserRound, description: 'Manage your details and preferences' },
 ];
 
 export default function Layout() {

@@ -16,6 +16,7 @@ const TOKEN_STORAGE_KEY = 'coverageatlas_access_token';
 
 let accessToken: string | null =
   typeof window !== 'undefined' ? window.localStorage.getItem(TOKEN_STORAGE_KEY) : null;
+let accessTokenProvider: (() => Promise<string | null>) | null = null;
 
 export function setAuthToken(token: string) {
   const normalized = token.trim();
@@ -34,21 +35,42 @@ export function getAuthToken(): string | null {
   return accessToken;
 }
 
-function withAuthHeaders(init?: RequestInit, includeJsonContentType = true): Headers {
+export function setAuthTokenProvider(provider: (() => Promise<string | null>) | null) {
+  accessTokenProvider = provider;
+}
+
+async function resolveAccessToken(): Promise<string | null> {
+  if (accessTokenProvider) {
+    try {
+      const provided = await accessTokenProvider();
+      const normalized = provided?.trim() || '';
+      if (normalized) {
+        return normalized;
+      }
+    } catch {
+      // Fall back to any manually stored token if the provider errors.
+    }
+  }
+  return accessToken;
+}
+
+async function withAuthHeaders(init?: RequestInit, includeJsonContentType = true): Promise<Headers> {
   const headers = new Headers(init?.headers || {});
   if (includeJsonContentType && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json');
   }
-  if (accessToken && !headers.has('Authorization')) {
-    headers.set('Authorization', `Bearer ${accessToken}`);
+  const token = await resolveAccessToken();
+  if (token && !headers.has('Authorization')) {
+    headers.set('Authorization', `Bearer ${token}`);
   }
   return headers;
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const headers = await withAuthHeaders(init, true);
   const res = await fetch(`${BASE}${path}`, {
     ...init,
-    headers: withAuthHeaders(init, true),
+    headers,
   });
   if (!res.ok) {
     const body = await res.text();
@@ -104,10 +126,11 @@ export const uploadDocument = async (
   form.append('payer_id', payerId);
   form.append('policy_title', policyTitle);
 
+  const headers = await withAuthHeaders(undefined, false);
   const res = await fetch(`${BASE}/documents/upload`, {
     method: 'POST',
     body: form,
-    headers: withAuthHeaders(undefined, false),
+    headers,
   });
   if (!res.ok) throw new Error(`Upload failed: ${res.status}`);
   return res.json();

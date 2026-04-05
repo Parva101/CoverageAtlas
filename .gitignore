@@ -9,3 +9,7 @@ insurance_policies/
 .pytest_cache/
 backend/.env
 backend/.env.local
+frontend/.env
+frontend/.env.local
+frontend/.env.development.local
+frontend/.env.production.local

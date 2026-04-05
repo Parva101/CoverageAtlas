@@ -120,7 +120,7 @@ def list_plans_by_ids(conn, plan_ids: list[str]) -> list[dict]:
         return []
     return fetchall(
         conn,
-        "SELECT * FROM plans WHERE id = ANY(%s)",
+        "SELECT * FROM plans WHERE id::text = ANY(%s)",
         (plan_ids,),
     )
 
@@ -461,7 +461,7 @@ def compare_drug_across_plans(conn, drug_name: str,
     """
     params = [f"%{drug_name.lower()}%"]
     if payer_ids:
-        sql    += " AND p.id = ANY(%s)"
+        sql    += " AND p.id::text = ANY(%s)"
         params.append(payer_ids)
     sql += " ORDER BY p.name"
     return fetchall(conn, sql, params)

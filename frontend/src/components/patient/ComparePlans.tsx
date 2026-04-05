@@ -7,8 +7,9 @@ import {
   XCircle,
   HelpCircle,
   Trophy,
-  ArrowRight,
   FileText,
+  Sparkles,
+  TrendingUp,
 } from 'lucide-react';
 import { getPlanMetadata, postCompare } from '../../api/client';
 import type { CompareRow, CoverageStatus, MetadataPlan } from '../../types';
@@ -24,27 +25,36 @@ const LEVEL_SCORE: Record<CoverageLevel, number> = {
 
 const LEVEL_CONFIG: Record<
   CoverageLevel,
-  { icon: typeof CheckCircle2; bg: string; border: string; text: string; label: string }
+  { icon: typeof CheckCircle2; bg: string; border: string; text: string; iconColor: string; badge: string; badgeBg: string; label: string }
 > = {
   covered: {
     icon: CheckCircle2,
     bg: 'bg-emerald-50',
     border: 'border-emerald-200',
-    text: 'text-emerald-800',
+    text: 'text-emerald-900',
+    iconColor: 'text-emerald-500',
+    badge: 'text-emerald-700',
+    badgeBg: 'bg-emerald-100',
     label: 'Likely covered',
   },
   restricted: {
     icon: AlertTriangle,
     bg: 'bg-amber-50',
     border: 'border-amber-200',
-    text: 'text-amber-800',
+    text: 'text-amber-900',
+    iconColor: 'text-amber-500',
+    badge: 'text-amber-700',
+    badgeBg: 'bg-amber-100',
     label: 'Covered with conditions',
   },
   not_covered: {
     icon: XCircle,
     bg: 'bg-red-50',
     border: 'border-red-200',
-    text: 'text-red-800',
+    text: 'text-red-900',
+    iconColor: 'text-red-500',
+    badge: 'text-red-700',
+    badgeBg: 'bg-red-100',
     label: 'Likely not covered',
   },
   unclear: {
@@ -52,6 +62,9 @@ const LEVEL_CONFIG: Record<
     bg: 'bg-slate-50',
     border: 'border-slate-200',
     text: 'text-slate-600',
+    iconColor: 'text-slate-400',
+    badge: 'text-slate-500',
+    badgeBg: 'bg-slate-100',
     label: 'Not clear yet',
   },
 };
@@ -104,6 +117,17 @@ function emptyRow(planId: string): CompareRow {
   };
 }
 
+function StatusPill({ label, value }: { label: string; value: boolean | null }) {
+  if (value === null) return null;
+  return (
+    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium ${
+      value ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-500'
+    }`}>
+      {value ? '⚠ ' : '✓ '}{label}
+    </span>
+  );
+}
+
 function ResultCard({
   result,
   tag,
@@ -116,40 +140,51 @@ function ResultCard({
   const citation = result.row.citations[0];
 
   return (
-    <div className={`rounded-xl border-2 ${cfg.border} ${cfg.bg} p-5 flex-1 space-y-3`}>
+    <div className={`rounded-2xl border-2 ${cfg.border} ${cfg.bg} p-5 flex-1 space-y-3 transition-all`}>
+      {/* Tags */}
       <div className="flex items-center gap-2 flex-wrap">
         {tag === 'yours' && (
-          <span className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded text-xs font-semibold">
+          <span className="px-2.5 py-1 bg-blue-600 text-white rounded-lg text-xs font-semibold">
             Your Plan
           </span>
         )}
         {tag === 'best' && (
-          <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded text-xs font-semibold">
-            <Trophy className="w-3 h-3" /> Best Coverage
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-emerald-600 text-white rounded-lg text-xs font-semibold">
+            <Trophy className="w-3 h-3" /> Best Match
           </span>
         )}
-        <h3 className="text-base font-semibold text-slate-900">{result.plan.plan_name}</h3>
       </div>
 
-      <p className="text-xs text-slate-500">{result.plan.payer_name}</p>
+      {/* Plan name */}
+      <div>
+        <h3 className="text-base font-bold text-slate-900">{result.plan.plan_name}</h3>
+        <p className="text-xs text-slate-400 mt-0.5">{result.plan.payer_name}</p>
+      </div>
 
-      <span
-        className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold ${cfg.bg} ${cfg.text} border ${cfg.border}`}
-      >
-        <Icon className="w-3.5 h-3.5" />
-        {cfg.label}
-      </span>
+      {/* Coverage status */}
+      <div className={`flex items-center gap-2.5 px-3 py-2 rounded-xl ${cfg.badgeBg} border ${cfg.border}`}>
+        <Icon className={`w-4 h-4 ${cfg.iconColor} shrink-0`} />
+        <span className={`text-sm font-semibold ${cfg.badge}`}>{cfg.label}</span>
+      </div>
 
-      <p className="text-sm text-slate-700 leading-relaxed">{result.summary}</p>
+      {/* Auth pills */}
+      <div className="flex flex-wrap gap-1.5">
+        <StatusPill label="Prior Auth" value={result.row.prior_auth_required} />
+        <StatusPill label="Step Therapy" value={result.row.step_therapy_required} />
+      </div>
 
+      {/* Summary */}
+      <p className="text-sm text-slate-600 leading-relaxed">{result.summary}</p>
+
+      {/* Citation */}
       {citation && (
-        <div className="border-t border-slate-200 pt-3">
+        <div className="border-t border-slate-200/80 pt-3">
           <div className="flex items-start gap-2">
-            <FileText className="w-3.5 h-3.5 text-slate-400 mt-0.5 shrink-0" />
-            <p className="text-xs text-slate-500 leading-relaxed italic">
+            <FileText className="w-3.5 h-3.5 text-slate-300 mt-0.5 shrink-0" />
+            <p className="text-xs text-slate-400 leading-relaxed italic">
               &quot;{citation.snippet}&quot;
               {(citation.section || citation.page) && (
-                <span className="not-italic ml-1 text-slate-400">
+                <span className="not-italic ml-1 text-slate-300">
                   {citation.section || 'Policy'}
                   {citation.page ? `, p.${citation.page}` : ''}
                 </span>
@@ -266,66 +301,81 @@ export default function ComparePlans() {
     myResult.row.criteria_summary.length >= bestResult.row.criteria_summary.length;
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-blue-50/50 to-white">
-      <div className="max-w-4xl mx-auto px-5 py-10 space-y-8">
-        <div className="text-center">
-          <div className="w-14 h-14 rounded-2xl bg-blue-100 flex items-center justify-center mx-auto mb-4">
-            <GitCompareArrows className="w-7 h-7 text-blue-600" />
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50/30 to-white">
+      <div className="max-w-4xl mx-auto px-5 py-10 space-y-6">
+        {/* Header */}
+        <div className="text-center animate-fade-in-up">
+          <div className="inline-flex items-center gap-2 px-3 py-1.5 bg-blue-100 text-blue-700 rounded-full text-xs font-semibold mb-4">
+            <TrendingUp className="w-3.5 h-3.5" />
+            Compare across all available plans
           </div>
-          <h1 className="text-2xl font-semibold text-slate-900">Compare Your Plan</h1>
+          <h1 className="text-3xl font-bold text-slate-900 tracking-tight">Compare Plan Coverage</h1>
           <p className="text-slate-500 mt-2 text-sm leading-relaxed max-w-lg mx-auto">
-            Compare your selected plan with other plans using normalized backend policy data.
+            See how your plan stacks up against alternatives for any medication.
           </p>
         </div>
 
-        <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 space-y-4">
-          <div>
-            <label className="text-sm font-medium text-slate-700 mb-2 block">Your insurance plan</label>
-            <select
-              value={myPlanId}
-              onChange={e => setMyPlanId(e.target.value)}
-              className="w-full px-4 py-3 border border-slate-200 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              disabled={loadingPlans || plans.length === 0}
-            >
-              <option value="">Select your plan...</option>
-              {plans.map(plan => (
-                <option key={plan.plan_id} value={plan.plan_id}>
-                  {plan.plan_name} - {plan.payer_name}
-                </option>
-              ))}
-            </select>
-            {loadingPlans && <p className="mt-2 text-xs text-slate-400">Loading plans...</p>}
-            {metadataError && <p className="mt-2 text-xs text-amber-600">{metadataError}</p>}
-          </div>
+        {/* Form card */}
+        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-5 space-y-4 animate-fade-in-up stagger-1">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2 block">
+                Your insurance plan
+              </label>
+              <select
+                value={myPlanId}
+                onChange={e => setMyPlanId(e.target.value)}
+                className="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                disabled={loadingPlans || plans.length === 0}
+              >
+                <option value="">Select your plan...</option>
+                {plans.map(plan => (
+                  <option key={plan.plan_id} value={plan.plan_id}>
+                    {plan.plan_name} — {plan.payer_name}
+                  </option>
+                ))}
+              </select>
+              {loadingPlans && <p className="mt-1.5 text-xs text-slate-400">Loading plans...</p>}
+              {metadataError && <p className="mt-1.5 text-xs text-amber-600">{metadataError}</p>}
+            </div>
 
-          <div>
-            <label className="text-sm font-medium text-slate-700 mb-2 block">Medication name</label>
-            <input
-              type="text"
-              value={drugName}
-              onChange={e => setDrugName(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && handleCompare()}
-              placeholder="e.g. Ozempic, Humira, semaglutide"
-              className="w-full px-4 py-3 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            />
+            <div>
+              <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2 block">
+                Medication name
+              </label>
+              <input
+                type="text"
+                value={drugName}
+                onChange={e => setDrugName(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && handleCompare()}
+                placeholder="e.g. Ozempic, Humira, semaglutide"
+                className="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              />
+            </div>
           </div>
 
           <button
             onClick={handleCompare}
             disabled={loading || !drugName.trim() || !myPlanId}
-            className="w-full py-3 bg-blue-600 text-white text-sm font-medium rounded-xl hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+            className="w-full py-3 bg-blue-600 text-white text-sm font-semibold rounded-xl hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 transition-all hover:shadow-lg hover:shadow-blue-500/20 active:scale-[0.99]"
           >
-            {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <GitCompareArrows className="w-4 h-4" />}
+            {loading ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <GitCompareArrows className="w-4 h-4" />
+            )}
             {loading ? 'Comparing plans...' : 'Compare Plans'}
           </button>
         </div>
 
+        {/* Error */}
         {error && (
-          <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-center">
+          <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-center animate-fade-in">
             <p className="text-sm text-red-700">{error}</p>
           </div>
         )}
 
+        {/* No plans available */}
         {!loading && plans.length === 0 && !metadataError && (
           <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-center">
             <p className="text-sm text-amber-700">
@@ -334,28 +384,38 @@ export default function ComparePlans() {
           </div>
         )}
 
+        {/* Loading */}
         {loading && (
-          <div className="text-center py-8">
-            <Loader2 className="w-8 h-8 text-blue-500 animate-spin mx-auto mb-3" />
-            <p className="text-sm text-slate-500">Comparing coverage across plans...</p>
+          <div className="text-center py-12 animate-fade-in">
+            <div className="relative w-16 h-16 mx-auto mb-4">
+              <div className="absolute inset-0 rounded-full border-4 border-blue-100" />
+              <div className="absolute inset-0 rounded-full border-4 border-t-blue-500 animate-spin" />
+              <GitCompareArrows className="absolute inset-0 m-auto w-6 h-6 text-blue-500" />
+            </div>
+            <p className="text-sm font-medium text-slate-600">Comparing coverage across plans...</p>
+            <p className="text-xs text-slate-400 mt-1">Analyzing policy documents</p>
           </div>
         )}
 
+        {/* Your plan is best */}
         {!loading && myResult && (isSamePlan || myIsBest) && (
-          <div className="bg-emerald-50 border-2 border-emerald-300 rounded-xl p-5 text-center">
-            <Trophy className="w-8 h-8 text-emerald-500 mx-auto mb-2" />
-            <h3 className="text-lg font-semibold text-emerald-800">Great news</h3>
-            <p className="text-sm text-emerald-700 mt-1">
-              Your selected plan already appears to be the strongest match we found for <strong>{drugName}</strong>.
+          <div className="bg-gradient-to-br from-emerald-50 to-green-50 border-2 border-emerald-300 rounded-2xl p-6 text-center animate-fade-in-up">
+            <div className="w-14 h-14 rounded-2xl bg-emerald-100 flex items-center justify-center mx-auto mb-3">
+              <Trophy className="w-7 h-7 text-emerald-500" />
+            </div>
+            <h3 className="text-lg font-bold text-emerald-900">Your plan looks great</h3>
+            <p className="text-sm text-emerald-700 mt-1 max-w-sm mx-auto">
+              Your selected plan appears to be the strongest match we found for <strong>{drugName}</strong>.
             </p>
-            <div className="mt-4">
+            <div className="mt-5 max-w-md mx-auto">
               <ResultCard result={myResult} tag="yours" />
             </div>
           </div>
         )}
 
-        {!loading && myResult && !bestResult && (
-          <div className="space-y-4">
+        {/* No better alternative */}
+        {!loading && myResult && !bestResult && !(isSamePlan || myIsBest) && (
+          <div className="space-y-4 animate-fade-in-up">
             <ResultCard result={myResult} tag="yours" />
             <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 text-center">
               <p className="text-xs text-slate-500">
@@ -365,38 +425,50 @@ export default function ComparePlans() {
           </div>
         )}
 
+        {/* Side-by-side comparison */}
         {!loading && myResult && bestResult && !isSamePlan && !myIsBest && (
-          <div className="space-y-4">
-            <h2 className="text-lg font-semibold text-slate-900">{drugName} - Your Plan vs. Best Available</h2>
+          <div className="space-y-5 animate-fade-in-up">
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-bold text-slate-900">
+                {drugName} — Plan Comparison
+              </h2>
+              <span className="text-xs text-slate-400 bg-slate-100 px-2.5 py-1 rounded-lg">
+                {plans.length} plans analyzed
+              </span>
+            </div>
 
-            <div className="flex gap-4 items-stretch">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <ResultCard result={myResult} tag="yours" />
-              <div className="flex items-center shrink-0">
-                <ArrowRight className="w-5 h-5 text-slate-300" />
-              </div>
               <ResultCard result={bestResult} tag="best" />
             </div>
 
-            <div className="bg-blue-50 border border-blue-200 rounded-xl p-5 space-y-2">
-              <h3 className="text-sm font-semibold text-blue-900">What this means for you</h3>
-              <ul className="space-y-1.5 text-sm text-blue-800">
-                <li className="flex items-start gap-2">
-                  <span className="shrink-0">*</span>
+            {/* Verdict */}
+            <div className="bg-gradient-to-br from-blue-50 to-indigo-50 border border-blue-200 rounded-2xl p-5">
+              <div className="flex items-center gap-2.5 mb-3">
+                <div className="w-8 h-8 rounded-lg bg-blue-100 flex items-center justify-center">
+                  <Sparkles className="w-4 h-4 text-blue-600" />
+                </div>
+                <h3 className="text-sm font-bold text-blue-900">What this means for you</h3>
+              </div>
+              <ul className="space-y-2">
+                <li className="flex items-start gap-2.5 text-sm text-blue-800">
+                  <span className="w-1.5 h-1.5 rounded-full bg-blue-400 mt-2 shrink-0" />
                   <span>
                     <strong>{bestResult.plan.plan_name}</strong> currently looks stronger for <strong>{drugName}</strong> based on available policy evidence.
                   </span>
                 </li>
-                <li className="flex items-start gap-2">
-                  <span className="shrink-0">*</span>
-                  <span>Use this as a starting point only and confirm details with your insurer.</span>
+                <li className="flex items-start gap-2.5 text-sm text-blue-800">
+                  <span className="w-1.5 h-1.5 rounded-full bg-blue-400 mt-2 shrink-0" />
+                  <span>Use this as a starting point and confirm details with your insurer before making any decisions.</span>
                 </li>
               </ul>
             </div>
           </div>
         )}
 
+        {/* Disclaimer */}
         {!loading && myResult && (
-          <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-center">
+          <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-center animate-fade-in">
             <p className="text-xs text-amber-700 leading-relaxed">
               Informational only. Based on published policy documents; not a guarantee of coverage or a recommendation to switch plans.
             </p>
@@ -406,5 +478,3 @@ export default function ComparePlans() {
     </div>
   );
 }
-
-

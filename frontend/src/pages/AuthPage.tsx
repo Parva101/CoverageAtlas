@@ -9,6 +9,28 @@ interface AuthPageProps {
   mode: 'login' | 'signup';
 }
 
+function resolveSafeAuthMessage(params: {
+  signupError: string;
+  auth0Error: string | null;
+  auth0ErrorDescription: string | null;
+  sdkErrorMessage: string | undefined;
+}): string {
+  const { signupError, auth0Error, auth0ErrorDescription, sdkErrorMessage } = params;
+  if (signupError) return signupError;
+
+  const raw = `${auth0Error || ''} ${auth0ErrorDescription || ''} ${sdkErrorMessage || ''}`
+    .trim()
+    .toLowerCase();
+
+  if (!raw) return '';
+  if (raw.includes('access_denied')) return 'Access was denied. Please try again or contact support.';
+  if (raw.includes('login_required')) return 'Your session expired. Please log in again.';
+  if (raw.includes('consent_required')) return 'Additional consent is required. Please continue and approve access.';
+  if (raw.includes('invalid_request')) return 'Login request is invalid. Please refresh and try again.';
+  if (raw.includes('callback')) return 'Sign-in callback failed. Please retry login.';
+  return 'Unable to complete authentication right now. Please try again.';
+}
+
 function AuthDisabledPage() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50/40 to-white grid place-items-center px-6">
@@ -43,6 +65,12 @@ function Auth0AuthPage({ mode }: AuthPageProps) {
   const returnTo = params.get('returnTo') || '/ask';
   const auth0Error = params.get('error');
   const auth0ErrorDescription = params.get('error_description');
+  const safeAuthMessage = resolveSafeAuthMessage({
+    signupError,
+    auth0Error,
+    auth0ErrorDescription,
+    sdkErrorMessage: error?.message,
+  });
 
   useEffect(() => {
     if (!isLoading && isAuthenticated) {
@@ -54,14 +82,11 @@ function Auth0AuthPage({ mode }: AuthPageProps) {
     if (targetMode === 'signup') {
       const fullName = signupFullName.trim().replace(/\s+/g, ' ');
       const phone = signupPhone.trim();
-      if (!fullName || !phone) {
-        setSignupError('Please enter your full name and phone number to continue.');
-        return;
+      if (fullName || phone) {
+        saveSignupProfileBootstrap({ fullName, phone });
       }
-      saveSignupProfileBootstrap({ fullName, phone });
-    } else {
-      setSignupError('');
     }
+    setSignupError('');
 
     await loginWithRedirect({
       appState: { returnTo },
@@ -151,11 +176,11 @@ function Auth0AuthPage({ mode }: AuthPageProps) {
           </button>
         </div>
 
-        {(signupError || error || auth0Error || auth0ErrorDescription) && (
+        {safeAuthMessage && (
           <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2.5">
             <p className="text-xs font-semibold text-red-700">Authentication error</p>
             <p className="text-xs text-red-600 mt-1 leading-relaxed break-words">
-              {signupError || auth0ErrorDescription || auth0Error || error?.message || 'Unable to sign in right now.'}
+              {safeAuthMessage}
             </p>
           </div>
         )}

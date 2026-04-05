@@ -1,9 +1,10 @@
-import json
+﻿import json
 import os
 import time
 from threading import Lock
 from typing import Any
 from urllib.error import HTTPError, URLError
+from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
 from fastapi import Depends, HTTPException, Security, status
@@ -34,37 +35,74 @@ def _is_truthy(value: str) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _first_non_empty_env(*names: str) -> str:
+    for name in names:
+        value = os.environ.get(name, "").strip()
+        if value:
+            return value
+    return ""
+
+
+def _normalize_auth0_domain(value: str) -> str:
+    raw = value.strip().rstrip("/")
+    if not raw:
+        return ""
+    if "://" not in raw:
+        return raw
+
+    parsed = urlparse(raw)
+    # Accept either full URL (https://tenant.us.auth0.com) or just host-like strings.
+    host = parsed.netloc or parsed.path
+    return host.strip().strip("/")
+
+
+def _normalize_issuer(value: str, domain: str) -> str:
+    raw = value.strip()
+    if not raw:
+        return f"https://{domain}/"
+    if "://" not in raw:
+        return f"https://{_normalize_auth0_domain(raw)}/"
+    return raw.rstrip("/") + "/"
+
+
+def _resolve_domain() -> str:
+    return _normalize_auth0_domain(
+        _first_non_empty_env("AUTH0_DOMAIN", "VITE_AUTH0_DOMAIN")
+    )
+
+
+def _resolve_audience() -> str:
+    return _first_non_empty_env("AUTH0_AUDIENCE", "AUTH0_API_IDENTIFIER", "VITE_AUTH0_AUDIENCE")
+
+
+def auth0_is_configured() -> bool:
+    return bool(_resolve_domain() and _resolve_audience())
+
+
 def is_auth_enabled() -> bool:
     explicit = os.environ.get("AUTH0_ENABLED")
     if explicit is not None and explicit.strip():
         return _is_truthy(explicit)
 
     # If explicit flag is absent, auto-enable only when core Auth0 settings exist.
-    return bool(os.environ.get("AUTH0_DOMAIN", "").strip() and os.environ.get("AUTH0_AUDIENCE", "").strip())
+    return bool(_resolve_domain() and _resolve_audience())
 
 
 def _load_jose():
     try:
-        import jwt
-        from jwt.exceptions import PyJWTError
+        from jose import JOSEError, JWTError, jwt
     except ImportError as exc:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="PyJWT is required for Auth0 token validation.",
+            detail="python-jose is required for Auth0 token validation.",
         ) from exc
-    return jwt, PyJWTError
-
-
-def auth0_is_configured() -> bool:
-    domain = os.environ.get("AUTH0_DOMAIN", "").strip().rstrip("/")
-    audience = os.environ.get("AUTH0_AUDIENCE", "").strip()
-    return bool(domain and audience)
+    return jwt, JWTError, JOSEError
 
 
 def _auth0_settings() -> tuple[str, str, str]:
-    domain = os.environ.get("AUTH0_DOMAIN", "").strip().rstrip("/")
-    audience = os.environ.get("AUTH0_AUDIENCE", "").strip()
-    issuer = os.environ.get("AUTH0_ISSUER", "").strip()
+    domain = _resolve_domain()
+    audience = _resolve_audience()
+    issuer = _first_non_empty_env("AUTH0_ISSUER")
 
     if not domain:
         raise HTTPException(
@@ -74,13 +112,10 @@ def _auth0_settings() -> tuple[str, str, str]:
     if not audience:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="AUTH0_AUDIENCE is not configured.",
+            detail="AUTH0_AUDIENCE (or AUTH0_API_IDENTIFIER) is not configured.",
         )
 
-    if not issuer:
-        issuer = f"https://{domain}/"
-    if not issuer.endswith("/"):
-        issuer = issuer + "/"
+    issuer = _normalize_issuer(issuer, domain)
 
     return domain, audience, issuer
 
@@ -139,12 +174,12 @@ def _select_key(jwks: dict[str, Any], kid: str | None) -> dict[str, Any] | None:
 
 
 def verify_auth0_token(token: str) -> AuthClaims:
-    jwt, JWTError = _load_jwt()
+    jwt, JWTError, JOSEError = _load_jose()
     domain, audience, issuer = _auth0_settings()
 
     try:
         unverified = jwt.get_unverified_header(token)
-    except JWTError as exc:
+    except (JWTError, JOSEError) as exc:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid token header.",
@@ -163,25 +198,23 @@ def verify_auth0_token(token: str) -> AuthClaims:
         )
 
     try:
-        public_key = jwt.algorithms.RSAAlgorithm.from_jwk(json.dumps(signing_key))
-    except Exception as exc:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid signing key format.",
-        ) from exc
-
-    try:
         payload = jwt.decode(
             token,
-            key=public_key,
+            signing_key,
             algorithms=ALGORITHMS,
             audience=audience,
             issuer=issuer,
         )
-    except JWTError as exc:
+    except (JWTError, JOSEError) as exc:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or expired token.",
+        ) from exc
+    except Exception as exc:
+        # Defensive catch-all for jose/libcrypto runtime errors so callers do not see a 500.
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Unable to validate bearer token.",
         ) from exc
 
     return dict(payload)

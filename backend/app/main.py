@@ -19,8 +19,8 @@ if str(ROOT_DIR) not in sys.path:
 
 import db as db_layer
 import extraction_agent
-import google.generativeai as genai
 from backend.app.auth import AuthClaims, extract_scopes, is_auth_enabled, require_admin_auth, require_auth0_token
+from gemini_client import embed_text, generate_text
 try:
     import qdrant_setup as qdrant_layer
 except ImportError:
@@ -31,10 +31,8 @@ API_PREFIX = "/api/v1"
 UPLOAD_DIR = ROOT_DIR / "data" / "uploads"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "YOUR_GEMINI_API_KEY_HERE")
 EMBED_MODEL = os.environ.get("EMBEDDING_MODEL", "models/text-embedding-004")
 QA_MODEL = os.environ.get("QA_MODEL", "gemini-1.5-pro")
-genai.configure(api_key=GEMINI_API_KEY)
 
 SOURCE_SCAN_RUNS: dict[str, dict[str, Any]] = {}
 
@@ -144,12 +142,11 @@ def _version_label(effective_date_value: Optional[str]) -> str:
 
 
 def _embedding(question: str) -> list[float]:
-    result = genai.embed_content(
+    return embed_text(
+        text=question,
         model=EMBED_MODEL,
-        content=question,
         task_type="retrieval_query",
     )
-    return result["embedding"]
 
 
 def _dedupe_nonempty(values: list[str]) -> list[str]:
@@ -380,9 +377,13 @@ def build_answer(question: str, chunks: list[dict], citations: list[dict]) -> tu
         f"Evidence:\n{context}\n"
     )
 
-    model = genai.GenerativeModel(model_name=QA_MODEL)
-    response = model.generate_content(prompt)
-    text = (response.text or "").strip() or "Insufficient evidence to answer from retrieved policy text."
+    text = (
+        generate_text(
+            prompt=prompt,
+            model=QA_MODEL,
+        ).strip()
+        or "Insufficient evidence to answer from retrieved policy text."
+    )
 
     avg_relevance = sum(c.get("relevance", 0) for c in chunks) / max(1, len(chunks))
     citation_factor = min(1.0, len(citations) / 4.0)

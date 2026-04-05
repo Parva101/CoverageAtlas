@@ -36,17 +36,14 @@ from qdrant_client.models import (
 )
 
 # ── Gemini (for smoke test) ─────────────────────────────────────────────────
-import google.generativeai as genai
+from gemini_client import embed_text
 
-GEMINI_API_KEY    = os.environ.get("GEMINI_API_KEY", "YOUR_GEMINI_API_KEY_HERE")
 QDRANT_URL        = os.environ.get("QDRANT_URL",        "http://localhost:6333")
 QDRANT_API_KEY    = os.environ.get("QDRANT_API_KEY",    "")
 QDRANT_COLLECTION = os.environ.get("QDRANT_COLLECTION", "policy_chunks")
 
 # Gemini text-embedding-004 produces 768-dim vectors
 VECTOR_DIM = 768
-
-genai.configure(api_key=GEMINI_API_KEY)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -332,12 +329,11 @@ def smoke_test(client: QdrantClient):
         "Step therapy applies: must have tried metformin first."
     )
 
-    result = genai.embed_content(
+    vector = embed_text(
+        text=sample_text,
         model="models/text-embedding-004",
-        content=[sample_text],
-        task_type="retrieval_document"
+        task_type="retrieval_document",
     )
-    vector = result["embedding"][0]
 
     test_id = upsert_chunks(
         client,
@@ -361,12 +357,11 @@ def smoke_test(client: QdrantClient):
     )
 
     # Now search for it
-    query_result = genai.embed_content(
+    query_vector = embed_text(
+        text="Does UHC cover Ozempic for diabetes?",
         model="models/text-embedding-004",
-        content=["Does UHC cover Ozempic for diabetes?"],
-        task_type="retrieval_query"
+        task_type="retrieval_query",
     )
-    query_vector = query_result["embedding"][0]
 
     hits = search(client, query_vector, top_k=3)
     log.info(f"Search returned {len(hits)} results")

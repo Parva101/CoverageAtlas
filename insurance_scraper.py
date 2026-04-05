@@ -22,10 +22,8 @@ from bs4 import BeautifulSoup
 from tqdm import tqdm
 
 # ── Google Gemini ──────────────────────────────────────────────────────────
-import google.generativeai as genai
+from gemini_client import embed_texts as embed_texts_via_gemini
 
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "YOUR_GEMINI_API_KEY_HERE")
-genai.configure(api_key=GEMINI_API_KEY)
 EMBED_MODEL = "models/text-embedding-004"   # 768-dim, free tier generous
 
 # ── ChromaDB ───────────────────────────────────────────────────────────────
@@ -163,12 +161,13 @@ def embed_texts(texts: list[str]) -> list[list[float]]:
     batch_size = 50
     for i in range(0, len(texts), batch_size):
         batch = texts[i:i+batch_size]
-        result = genai.embed_content(
-            model=EMBED_MODEL,
-            content=batch,
-            task_type="retrieval_document"
+        embeddings.extend(
+            embed_texts_via_gemini(
+                texts=batch,
+                model=EMBED_MODEL,
+                task_type="retrieval_document",
+            )
         )
-        embeddings.extend(result["embedding"])
         time.sleep(0.3)  # respect rate limits
     return embeddings
 

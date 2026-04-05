@@ -30,16 +30,13 @@ from datetime import datetime, date
 from typing import Optional
 
 import db as db_layer
+from gemini_client import embed_texts, generate_text
 try:
     import qdrant_setup as qdrant_layer
 except ImportError:
     qdrant_layer = None
 
 # ── Gemini ─────────────────────────────────────────────────────────────────
-import google.generativeai as genai
-
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "YOUR_GEMINI_API_KEY_HERE")
-genai.configure(api_key=GEMINI_API_KEY)
 EXTRACT_MODEL = "gemini-1.5-pro"
 EMBED_MODEL   = "models/text-embedding-004"
 
@@ -264,18 +261,14 @@ def split_into_sections(pages: list[dict], max_chars: int = 3000) -> list[dict]:
 def call_gemini_extractor(chunk_text: str, retries: int = 3) -> list[dict]:
     """Calls Gemini to extract coverage_rules from a text chunk."""
     prompt = EXTRACTION_PROMPT.format(chunk_text=chunk_text[:4000])
-    model  = genai.GenerativeModel(
-        model_name=EXTRACT_MODEL,
-        generation_config=genai.GenerationConfig(
-            temperature=0.0,      # deterministic extraction
-            max_output_tokens=4096,
-        )
-    )
-
     for attempt in range(retries):
         try:
-            response = model.generate_content(prompt)
-            raw = response.text.strip()
+            raw = generate_text(
+                prompt=prompt,
+                model=EXTRACT_MODEL,
+                temperature=0.0,      # deterministic extraction
+                max_output_tokens=4096,
+            ).strip()
 
             # Strip markdown fences if present
             raw = re.sub(r'^```(?:json)?\s*', '', raw, flags=re.MULTILINE)
@@ -542,12 +535,11 @@ def get_qdrant() -> Optional["QdrantClient"]:
 
 
 def embed_batch(texts: list[str]) -> list[list[float]]:
-    result = genai.embed_content(
+    return embed_texts(
+        texts=texts,
         model=EMBED_MODEL,
-        content=texts,
-        task_type="retrieval_document"
+        task_type="retrieval_document",
     )
-    return result["embedding"]
 
 
 def upsert_chunks_to_qdrant(client, sections: list[dict],

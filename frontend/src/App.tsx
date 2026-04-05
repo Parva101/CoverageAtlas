@@ -6,6 +6,7 @@ import VoiceCall from './components/patient/VoiceCall';
 import AccessLab from './components/patient/AccessLab';
 import PolicyTimeline from './components/patient/PolicyTimeline';
 import Profile from './components/patient/Profile';
+import MascotChatbot from './components/patient/MascotChatbot';
 import ProtectedRoute from './components/ProtectedRoute';
 import AuthPage from './pages/AuthPage';
 
@@ -39,6 +40,7 @@ export default function App() {
         }
       >
         <Route path="/ask" element={<AskQuestion />} />
+        <Route path="/mascot" element={<MascotChatbot />} />
         <Route path="/access-lab" element={<AccessLab />} />
         <Route path="/compare" element={<ComparePlans />} />
         <Route path="/voice" element={<VoiceCall />} />

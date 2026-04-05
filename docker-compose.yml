@@ -37,7 +37,7 @@ services:
       retries: 10
 
   qdrant:
-    image: qdrant/qdrant:v1.9.1
+    image: qdrant/qdrant:latest
     container_name: coverageatlas_qdrant
     restart: unless-stopped
     ports:

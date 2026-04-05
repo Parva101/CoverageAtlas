@@ -49,6 +49,30 @@ export interface QueryResponse {
     };
   };
   disclaimer: string;
+  reasoning?: {
+    route?: string;
+    route_reason?: string;
+    evidence_quality?: string;
+    evidence_strength?: number;
+    verifier_supported?: boolean;
+    verifier_reason?: string;
+    supporting_evidence_count?: number;
+  };
+  evidence_cards?: Array<{
+    source_index?: number;
+    payer_name?: string;
+    policy_title?: string;
+    section_title?: string;
+    page_number?: number;
+    snippet?: string;
+    relevance?: number;
+    policy_version_id?: string;
+  }>;
+  customer_help?: {
+    next_best_questions?: string[];
+    what_to_prepare?: string[];
+    call_script?: string[];
+  };
 }
 
 // POST /compare

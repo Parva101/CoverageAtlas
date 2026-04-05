@@ -1,6 +1,7 @@
 import { NavLink, Outlet } from 'react-router-dom';
 import {
   MessageCircle,
+  Bot,
   GitCompareArrows,
   FlaskConical,
   Phone,
@@ -14,6 +15,7 @@ import ThemeToggle from './ThemeToggle';
 
 const nav = [
   { to: '/ask', label: 'Ask a Question', icon: MessageCircle, description: 'Check your coverage' },
+  { to: '/mascot', label: 'Atlas Mascot AI', icon: Bot, description: 'Chat or switch to phone call' },
   { to: '/access-lab', label: 'Access Lab', icon: FlaskConical, description: 'Plan switch and denial strategy' },
   { to: '/compare', label: 'Compare Plans', icon: GitCompareArrows, description: 'Find the best plan' },
   { to: '/voice', label: 'Voice Assistant', icon: Phone, description: 'Chat about coverage' },

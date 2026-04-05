@@ -1,10 +1,10 @@
-"""
+﻿"""
 qdrant_setup.py
-════════════════
+â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 Initializes and manages the Qdrant vector collections for CoverageAtlas.
 
 Collections:
-  policy_chunks  — main RAG retrieval collection (768-dim Gemini embeddings)
+  policy_chunks  â€” main RAG retrieval collection (768-dim Gemini embeddings)
 
 Usage:
     python qdrant_setup.py --init          # create collection (safe to re-run)
@@ -18,8 +18,15 @@ import uuid
 import argparse
 import logging
 from datetime import datetime
+from typing import Optional
 
-# ── Qdrant ─────────────────────────────────────────────────────────────────
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except Exception:
+    pass
+
+# â”€â”€ Qdrant â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 from qdrant_client import QdrantClient
 from qdrant_client.models import (
     Distance,
@@ -35,8 +42,9 @@ from qdrant_client.models import (
     SearchRequest,
 )
 from qdrant_client.http.exceptions import UnexpectedResponse
+import requests
 
-# ── Gemini (for smoke test) ─────────────────────────────────────────────────
+# â”€â”€ Gemini (for smoke test) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 import ai_provider
 
 QDRANT_URL        = os.environ.get("QDRANT_URL",        "http://10.157.92.242:6333/")
@@ -51,29 +59,76 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(message)s"
 )
 log = logging.getLogger(__name__)
+_USE_LEGACY_SEARCH: Optional[bool] = None
 
 
-# ══════════════════════════════════════════════════════════════════════════════
+def _parse_version(version: str) -> tuple[int, int, int]:
+    parts = (version or "").split(".")
+    nums = []
+    for p in parts[:3]:
+        try:
+            nums.append(int(p))
+        except ValueError:
+            nums.append(0)
+    while len(nums) < 3:
+        nums.append(0)
+    return nums[0], nums[1], nums[2]
+
+
+def _use_legacy_search_api() -> bool:
+    global _USE_LEGACY_SEARCH
+    if _USE_LEGACY_SEARCH is not None:
+        return _USE_LEGACY_SEARCH
+
+    # Manual override if needed.
+    override = os.environ.get("QDRANT_FORCE_LEGACY_SEARCH", "").strip().lower()
+    if override in {"1", "true", "yes", "on"}:
+        _USE_LEGACY_SEARCH = True
+        return True
+    if override in {"0", "false", "no", "off"}:
+        _USE_LEGACY_SEARCH = False
+        return False
+
+    # Auto-detect by server version.
+    try:
+        base = QDRANT_URL.rstrip("/")
+        response = requests.get(f"{base}/", timeout=5)
+        response.raise_for_status()
+        version = response.json().get("version", "")
+        _USE_LEGACY_SEARCH = _parse_version(version) < (1, 10, 0)
+        if _USE_LEGACY_SEARCH:
+            log.info(
+                "Qdrant version %s detected; using legacy /points/search API.",
+                version,
+            )
+        return _USE_LEGACY_SEARCH
+    except Exception:
+        # If detection fails, keep modern path + runtime fallback.
+        _USE_LEGACY_SEARCH = False
+        return False
+
+
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 # COLLECTION SCHEMA
-# ══════════════════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 # Every point stored in Qdrant has this payload structure.
 # These mirror the PostgreSQL metadata so we can filter during retrieval
 # without a DB roundtrip.
 PAYLOAD_SCHEMA = {
-    # ── identifiers (link back to PostgreSQL) ──
+    # â”€â”€ identifiers (link back to PostgreSQL) â”€â”€
     "policy_version_id": PayloadSchemaType.KEYWORD,  # UUID string
     "chunk_id":          PayloadSchemaType.KEYWORD,  # UUID string
     "chunk_index":       PayloadSchemaType.INTEGER,
 
-    # ── retrieval filters ──────────────────────
+    # â”€â”€ retrieval filters â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     "payer_name":        PayloadSchemaType.KEYWORD,
     "payer_type":        PayloadSchemaType.KEYWORD,  # commercial/medicare/medicaid
     "policy_category":   PayloadSchemaType.KEYWORD,  # medical_benefit/pharmacy_benefit
     "coverage_status":   PayloadSchemaType.KEYWORD,  # covered/restricted/not_covered/unknown
     "drug_name":         PayloadSchemaType.KEYWORD,
 
-    # ── display / citation ─────────────────────
+    # â”€â”€ display / citation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     "policy_title":      PayloadSchemaType.KEYWORD,
     "version_label":     PayloadSchemaType.KEYWORD,
     "effective_date":    PayloadSchemaType.KEYWORD,  # ISO date string
@@ -93,9 +148,9 @@ def get_client() -> QdrantClient:
     )
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# INIT — creates collection with optimal settings for policy retrieval
-# ══════════════════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# INIT â€” creates collection with optimal settings for policy retrieval
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 def init_collection(client: QdrantClient, reset: bool = False):
     """
@@ -111,7 +166,7 @@ def init_collection(client: QdrantClient, reset: bool = False):
         existing = []
 
     if QDRANT_COLLECTION in existing:
-        log.info(f"Collection '{QDRANT_COLLECTION}' already exists — skipping init.")
+        log.info(f"Collection '{QDRANT_COLLECTION}' already exists â€” skipping init.")
         return
 
     client.create_collection(
@@ -122,11 +177,11 @@ def init_collection(client: QdrantClient, reset: bool = False):
         ),
         # HNSW tuning for fast recall at our expected scale (~100K vectors)
         hnsw_config=HnswConfigDiff(
-            m=16,               # graph connectivity — higher = more accurate, slower build
+            m=16,               # graph connectivity â€” higher = more accurate, slower build
             ef_construct=100,   # build-time search width
             full_scan_threshold=10_000,
         ),
-        # Optimizer — batches small updates to keep index fresh
+        # Optimizer â€” batches small updates to keep index fresh
         optimizers_config=OptimizersConfigDiff(
             indexing_threshold=5_000,
         ),
@@ -147,9 +202,9 @@ def init_collection(client: QdrantClient, reset: bool = False):
     log.info(f"Payload indexes created for {len(PAYLOAD_SCHEMA)} fields.")
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# UPSERT — called by the extraction pipeline
-# ══════════════════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# UPSERT â€” called by the extraction pipeline
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 def upsert_chunks(
     client: QdrantClient,
@@ -201,9 +256,9 @@ def upsert_chunks(
     return ids
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# SEARCH — used by the Q&A agent
-# ══════════════════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# SEARCH â€” used by the Q&A agent
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 def search(
     client: QdrantClient,
@@ -251,8 +306,9 @@ def search(
 
     qdrant_filter = Filter(must=conditions) if conditions else None
 
+    use_legacy = _use_legacy_search_api()
     try:
-        if hasattr(client, "query_points"):
+        if not use_legacy and hasattr(client, "query_points"):
             response = client.query_points(
                 collection_name=QDRANT_COLLECTION,
                 query=query_vector,
@@ -263,15 +319,25 @@ def search(
             )
             results = response.points or []
         else:
-            raise AttributeError("query_points not available")
+            legacy = client.http.search_api.search_points(
+                collection_name=QDRANT_COLLECTION,
+                search_request=SearchRequest(
+                    vector=query_vector,
+                    filter=qdrant_filter,
+                    limit=top_k,
+                    with_payload=True,
+                    with_vector=False,
+                ),
+            )
+            results = legacy.result or []
     except Exception as exc:
+        # Extra guard: if we mis-detected and got a legacy 404 anyway, retry once with legacy endpoint.
         is_legacy_404 = (
             isinstance(exc, UnexpectedResponse)
             and getattr(exc, "status_code", None) == 404
         ) or "404" in str(exc)
         if not is_legacy_404:
             raise
-
         legacy = client.http.search_api.search_points(
             collection_name=QDRANT_COLLECTION,
             search_request=SearchRequest(
@@ -297,6 +363,8 @@ def search(
             "source_url":        r.payload.get("source_url", ""),
             "section_title":     r.payload.get("section_title", ""),
             "page_number":       r.payload.get("page_number", 0),
+            "coverage_status":   r.payload.get("coverage_status", ""),
+            "drug_name":         r.payload.get("drug_name", ""),
             "policy_version_id": r.payload.get("policy_version_id", ""),
             "chunk_index":       r.payload.get("chunk_index", 0),
         }
@@ -304,9 +372,9 @@ def search(
     ]
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# DELETE — removes all chunks for a specific policy version
-# ══════════════════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# DELETE â€” removes all chunks for a specific policy version
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 def delete_version_chunks(client: QdrantClient, policy_version_id: str):
     """Removes all Qdrant points for a given policy version (used on re-ingest)."""
@@ -322,9 +390,9 @@ def delete_version_chunks(client: QdrantClient, policy_version_id: str):
     log.info(f"Deleted Qdrant points for version: {policy_version_id}")
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# STATUS — human-readable collection stats
-# ══════════════════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# STATUS â€” human-readable collection stats
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 def print_status(client: QdrantClient):
     try:
@@ -341,9 +409,9 @@ def print_status(client: QdrantClient):
         log.error(f"Could not get collection status: {e}")
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# SMOKE TEST — embeds a sample chunk and runs a search
-# ══════════════════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# SMOKE TEST â€” embeds a sample chunk and runs a search
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 def smoke_test(client: QdrantClient):
     log.info("Running smoke test...")
@@ -351,7 +419,7 @@ def smoke_test(client: QdrantClient):
     # Insert a sample point
     sample_text = (
         "UnitedHealthcare covers semaglutide (Ozempic/Wegovy) for members with "
-        "Type 2 diabetes or BMI ≥30. Prior authorization is required. "
+        "Type 2 diabetes or BMI â‰¥30. Prior authorization is required. "
         "Step therapy applies: must have tried metformin first."
     )
 
@@ -396,12 +464,12 @@ def smoke_test(client: QdrantClient):
     for h in hits:
         log.info(f"  Score {h['relevance']} | {h['payer_name']} | {h['text'][:80]}")
 
-    log.info("✅ Smoke test passed!")
+    log.info("âœ… Smoke test passed!")
 
 
-# ══════════════════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 # CLI
-# ══════════════════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 def main():
     parser = argparse.ArgumentParser(description="CoverageAtlas Qdrant Setup")
@@ -432,3 +500,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

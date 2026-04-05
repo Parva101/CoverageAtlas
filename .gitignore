@@ -14,3 +14,12 @@ frontend/.env
 frontend/.env.local
 frontend/.env.development.local
 frontend/.env.production.local
+
+# Local runtime artifacts
+logs/
+.playwright-cli/
+
+# Local backup/import files
+*_backup.tar.gz
+coverageatlas_full_*.sql
+coverageatlas_pre_teammate_merge_*.dump

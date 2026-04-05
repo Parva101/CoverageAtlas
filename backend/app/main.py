@@ -17,10 +17,10 @@ ROOT_DIR = Path(__file__).resolve().parents[2]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
+import requests as _requests
 import db as db_layer
 import extraction_agent
-import google.generativeai as genai
-from backend.app.auth import AuthClaims, require_admin_auth
+from backend.app.auth import AuthClaims, extract_scopes, is_auth_enabled, require_admin_auth, require_auth0_token
 try:
     import qdrant_setup as qdrant_layer
 except ImportError:
@@ -31,10 +31,9 @@ API_PREFIX = "/api/v1"
 UPLOAD_DIR = ROOT_DIR / "data" / "uploads"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "YOUR_GEMINI_API_KEY_HERE")
-EMBED_MODEL = os.environ.get("EMBEDDING_MODEL", "models/text-embedding-004")
-QA_MODEL = os.environ.get("QA_MODEL", "gemini-1.5-pro")
-genai.configure(api_key=GEMINI_API_KEY)
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+QA_MODEL       = os.environ.get("QA_MODEL", "gemini-2.5-flash")
+EMBED_MODEL    = "models/gemini-embedding-001"
 
 SOURCE_SCAN_RUNS: dict[str, dict[str, Any]] = {}
 
@@ -143,13 +142,20 @@ def _version_label(effective_date_value: Optional[str]) -> str:
     return f"v{date.today().isoformat()}"
 
 
+VECTOR_DIM = 768
+
+
 def _embedding(question: str) -> list[float]:
-    result = genai.embed_content(
-        model=EMBED_MODEL,
-        content=question,
-        task_type="retrieval_query",
-    )
-    return result["embedding"]
+    url = f"https://generativelanguage.googleapis.com/v1beta/{EMBED_MODEL}:embedContent?key={GEMINI_API_KEY}"
+    payload = {
+        "model": EMBED_MODEL,
+        "content": {"parts": [{"text": question}]},
+        "taskType": "RETRIEVAL_QUERY",
+        "outputDimensionality": VECTOR_DIM,
+    }
+    resp = _requests.post(url, json=payload, timeout=30)
+    resp.raise_for_status()
+    return resp.json()["embedding"]["values"]
 
 
 def _dedupe_nonempty(values: list[str]) -> list[str]:
@@ -336,7 +342,7 @@ def build_citations(chunks: list[dict]) -> list[dict]:
         with db_layer.get_conn() as conn:
             rows = db_layer.fetchall(
                 conn,
-                "SELECT id, document_id FROM policy_versions WHERE id = ANY(%s)",
+                "SELECT id::text, document_id::text FROM policy_versions WHERE id::text = ANY(%s)",
                 (version_ids,),
             )
             for row in rows:
@@ -380,14 +386,37 @@ def build_answer(question: str, chunks: list[dict], citations: list[dict]) -> tu
         f"Evidence:\n{context}\n"
     )
 
-    model = genai.GenerativeModel(model_name=QA_MODEL)
-    response = model.generate_content(prompt)
-    text = (response.text or "").strip() or "Insufficient evidence to answer from retrieved policy text."
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{QA_MODEL}:generateContent?key={GEMINI_API_KEY}"
+    resp = _requests.post(url, json={
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {"temperature": 0.0, "maxOutputTokens": 1024},
+    }, timeout=60)
+    resp.raise_for_status()
+    text = (resp.json()["candidates"][0]["content"]["parts"][0]["text"] or "").strip() or "Insufficient evidence to answer from retrieved policy text."
 
     avg_relevance = sum(c.get("relevance", 0) for c in chunks) / max(1, len(chunks))
     citation_factor = min(1.0, len(citations) / 4.0)
     confidence = max(0.0, min(0.99, round((avg_relevance * 0.75) + (citation_factor * 0.25), 2)))
     return text, confidence
+
+
+def _resolve_request_user_id(claims: AuthClaims, fallback: Optional[str] = None) -> str:
+    sub = str(claims.get("sub", "")).strip()
+    if sub:
+        return sub
+    return str(fallback or "anonymous")
+
+
+def _session_owned_by_user(conn, session_id: str, user_id: str) -> bool:
+    row = db_layer.fetchone(
+        conn,
+        "SELECT id, user_id FROM qa_sessions WHERE id = %s",
+        (session_id,),
+    )
+    if not row:
+        return False
+    owner = str(row.get("user_id") or "").strip()
+    return owner == "" or owner == user_id
 
 
 def run_ingestion_job(document_id: str, payer_id: str, policy_title: str, effective_date_value: Optional[str]):
@@ -455,6 +484,62 @@ def health():
     return {"status": "ok"}
 
 
+@app.get(f"{API_PREFIX}/auth/me")
+def auth_me(claims: AuthClaims = Depends(require_auth0_token)):
+    return {
+        "sub": claims.get("sub"),
+        "scope": claims.get("scope", ""),
+        "permissions": claims.get("permissions", []),
+        "scopes": sorted(extract_scopes(claims)),
+        "auth_enabled": is_auth_enabled(),
+    }
+
+
+@app.get(f"{API_PREFIX}/metadata/plans")
+def metadata_plans(_auth: AuthClaims = Depends(require_auth0_token)):
+    with db_layer.get_conn() as conn:
+        payers = db_layer.list_payers(conn)
+        plans = db_layer.list_plans(conn)
+
+    if not plans:
+        plans = [
+            {
+                "id": row["id"],
+                "payer_id": row["id"],
+                "payer_name": row["name"],
+                "plan_name": f"{row['name']} (default)",
+                "plan_type": None,
+                "market": None,
+                "is_virtual": True,
+            }
+            for row in payers
+        ]
+
+    return {
+        "payers": [
+            {
+                "payer_id": str(row["id"]),
+                "name": row["name"],
+                "payer_type": row.get("payer_type"),
+                "region": row.get("region"),
+            }
+            for row in payers
+        ],
+        "plans": [
+            {
+                "plan_id": str(row["id"]),
+                "payer_id": str(row["payer_id"]),
+                "payer_name": row.get("payer_name"),
+                "plan_name": row["plan_name"],
+                "plan_type": row.get("plan_type"),
+                "market": row.get("market"),
+                "is_virtual": bool(row.get("is_virtual", False)),
+            }
+            for row in plans
+        ],
+    }
+
+
 @app.post(f"{API_PREFIX}/documents/upload")
 async def documents_upload(
     background_tasks: BackgroundTasks,
@@ -512,7 +597,10 @@ async def documents_upload(
 
 
 @app.get(f"{API_PREFIX}/documents/{{document_id}}/status")
-def document_status(document_id: str):
+def document_status(
+    document_id: str,
+    _auth: AuthClaims = Depends(require_auth0_token),
+):
     with db_layer.get_conn() as conn:
         document = db_layer.get_document(conn, document_id)
         if not document:
@@ -533,7 +621,10 @@ def document_status(document_id: str):
 
 
 @app.post(f"{API_PREFIX}/query")
-def query(req: QueryRequest):
+def query(
+    req: QueryRequest,
+    _auth: AuthClaims = Depends(require_auth0_token),
+):
     if not req.question.strip():
         return error_response(400, "VALIDATION_ERROR", "question is required")
 
@@ -567,12 +658,29 @@ def query(req: QueryRequest):
 
 
 @app.post(f"{API_PREFIX}/compare")
-def compare(req: CompareRequest):
+def compare(
+    req: CompareRequest,
+    _auth: AuthClaims = Depends(require_auth0_token),
+):
     if not req.plan_ids:
         return error_response(400, "VALIDATION_ERROR", "plan_ids is required")
 
     with db_layer.get_conn() as conn:
         plans = db_layer.list_plans_by_ids(conn, req.plan_ids)
+        if not plans:
+            payer_rows = db_layer.fetchall(
+                conn,
+                "SELECT id, name FROM payers WHERE id::text = ANY(%s)",
+                (req.plan_ids,),
+            )
+            plans = [
+                {
+                    "id": row["id"],
+                    "payer_id": row["id"],
+                    "plan_name": f"{row['name']} (default)",
+                }
+                for row in payer_rows
+            ]
         if not plans:
             return error_response(404, "NOT_FOUND", "No matching plans found", {"plan_ids": req.plan_ids})
 
@@ -633,6 +741,7 @@ def policy_changes(
     policy_id: str,
     from_: str = Query(..., alias="from"),
     to: str = Query(..., alias="to"),
+    _auth: AuthClaims = Depends(require_auth0_token),
 ):
     with db_layer.get_conn() as conn:
         from_version = resolve_version(conn, policy_id, from_)
@@ -685,7 +794,10 @@ def sources_scan(
 
 
 @app.get(f"{API_PREFIX}/sources/scan/{{scan_id}}")
-def scan_status(scan_id: str):
+def scan_status(
+    scan_id: str,
+    _auth: AuthClaims = Depends(require_admin_auth),
+):
     scan = SOURCE_SCAN_RUNS.get(scan_id)
     if not scan:
         return error_response(404, "NOT_FOUND", "scan_id not found", {"scan_id": scan_id})
@@ -693,15 +805,31 @@ def scan_status(scan_id: str):
 
 
 @app.post(f"{API_PREFIX}/voice/session/start")
-def voice_start(req: VoiceStartRequest):
+def voice_start(
+    req: VoiceStartRequest,
+    auth: AuthClaims = Depends(require_auth0_token),
+):
+    user_id = _resolve_request_user_id(auth, fallback=req.user_id)
     with db_layer.get_conn() as conn:
-        session_id = db_layer.create_qa_session(conn, user_id=req.user_id, channel="voice")
+        session_id = db_layer.create_qa_session(conn, user_id=user_id, channel="voice")
     return {"session_id": session_id, "status": "started"}
 
 
 @app.post(f"{API_PREFIX}/voice/session/{{session_id}}/turn")
-def voice_turn(session_id: str, req: VoiceTurnRequest):
+def voice_turn(
+    session_id: str,
+    req: VoiceTurnRequest,
+    auth: AuthClaims = Depends(require_auth0_token),
+):
+    user_id = _resolve_request_user_id(auth)
     with db_layer.get_conn() as conn:
+        if not _session_owned_by_user(conn, session_id, user_id):
+            return error_response(
+                403,
+                "FORBIDDEN",
+                "You are not allowed to access this voice session.",
+                {"session_id": session_id},
+            )
         db_layer.append_qa_message(conn, session_id, "user", req.utterance)
 
     query_req = QueryRequest(
@@ -732,8 +860,20 @@ def voice_turn(session_id: str, req: VoiceTurnRequest):
 
 
 @app.post(f"{API_PREFIX}/voice/session/{{session_id}}/end")
-def voice_end(session_id: str, req: VoiceEndRequest):
+def voice_end(
+    session_id: str,
+    req: VoiceEndRequest,
+    auth: AuthClaims = Depends(require_auth0_token),
+):
+    user_id = _resolve_request_user_id(auth)
     with db_layer.get_conn() as conn:
+        if not _session_owned_by_user(conn, session_id, user_id):
+            return error_response(
+                403,
+                "FORBIDDEN",
+                "You are not allowed to access this voice session.",
+                {"session_id": session_id},
+            )
         if req.summary:
             summary = req.summary
         else:

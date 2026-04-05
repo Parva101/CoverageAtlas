@@ -35,18 +35,41 @@ from qdrant_client.models import (
     SearchRequest,
 )
 
-# ── Gemini (for smoke test) ─────────────────────────────────────────────────
-import google.generativeai as genai
+# ── Gemini embeddings ───────────────────────────────────────────────────────
+import requests as _requests
 
-GEMINI_API_KEY    = os.environ.get("GEMINI_API_KEY", "YOUR_GEMINI_API_KEY_HERE")
+GEMINI_API_KEY    = os.environ.get("GEMINI_API_KEY", "")
 QDRANT_URL        = os.environ.get("QDRANT_URL",        "http://localhost:6333")
 QDRANT_API_KEY    = os.environ.get("QDRANT_API_KEY",    "")
 QDRANT_COLLECTION = os.environ.get("QDRANT_COLLECTION", "policy_chunks")
 
-# Gemini text-embedding-004 produces 768-dim vectors
-VECTOR_DIM = 768
+VECTOR_DIM     = 768
+EMBED_MODEL    = "models/gemini-embedding-001"
 
-genai.configure(api_key=GEMINI_API_KEY)
+_TASK_TYPE_MAP = {
+    "retrieval_document": "RETRIEVAL_DOCUMENT",
+    "retrieval_query":    "RETRIEVAL_QUERY",
+}
+
+
+def _embed(texts, task_type="retrieval_document") -> list[list[float]]:
+    """Embed texts via Gemini embedContent REST endpoint."""
+    if isinstance(texts, str):
+        texts = [texts]
+    task = _TASK_TYPE_MAP.get(task_type, "RETRIEVAL_DOCUMENT")
+    url = f"https://generativelanguage.googleapis.com/v1beta/{EMBED_MODEL}:embedContent?key={GEMINI_API_KEY}"
+    vectors = []
+    for t in texts:
+        payload = {
+            "model": EMBED_MODEL,
+            "content": {"parts": [{"text": t}]},
+            "taskType": task,
+            "outputDimensionality": VECTOR_DIM,
+        }
+        resp = _requests.post(url, json=payload, timeout=30)
+        resp.raise_for_status()
+        vectors.append(resp.json()["embedding"]["values"])
+    return vectors
 
 logging.basicConfig(
     level=logging.INFO,
@@ -332,12 +355,7 @@ def smoke_test(client: QdrantClient):
         "Step therapy applies: must have tried metformin first."
     )
 
-    result = genai.embed_content(
-        model="models/text-embedding-004",
-        content=[sample_text],
-        task_type="retrieval_document"
-    )
-    vector = result["embedding"][0]
+    vector = _embed([sample_text], task_type="retrieval_document")[0]
 
     test_id = upsert_chunks(
         client,
@@ -361,12 +379,7 @@ def smoke_test(client: QdrantClient):
     )
 
     # Now search for it
-    query_result = genai.embed_content(
-        model="models/text-embedding-004",
-        content=["Does UHC cover Ozempic for diabetes?"],
-        task_type="retrieval_query"
-    )
-    query_vector = query_result["embedding"][0]
+    query_vector = _embed(["Does UHC cover Ozempic for diabetes?"], task_type="retrieval_query")[0]
 
     hits = search(client, query_vector, top_k=3)
     log.info(f"Search returned {len(hits)} results")

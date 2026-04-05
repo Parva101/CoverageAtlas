@@ -81,7 +81,9 @@ services:
       redis:
         condition: service_started
     volumes:
-      - ./data:/app/data          # uploaded policy docs persist here
+      - ./data:/app/data                                    # uploaded docs
+      - ./insurance_policies:/app/insurance_policies        # scraped PDFs
+      - ./cms_cache:/app/cms_cache                          # CMS download cache
 
   frontend:
     build:

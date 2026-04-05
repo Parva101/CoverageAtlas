@@ -125,6 +125,24 @@ def list_plans_by_ids(conn, plan_ids: list[str]) -> list[dict]:
     )
 
 
+def list_plans(conn) -> list[dict]:
+    return fetchall(
+        conn,
+        """
+        SELECT
+            pl.id,
+            pl.payer_id,
+            pl.plan_name,
+            pl.plan_type,
+            pl.market,
+            p.name AS payer_name
+        FROM plans pl
+        JOIN payers p ON pl.payer_id = p.id
+        ORDER BY p.name, pl.plan_name
+        """,
+    )
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # DOCUMENTS
 # ══════════════════════════════════════════════════════════════════════════════

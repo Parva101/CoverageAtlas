@@ -5,6 +5,7 @@ import {
   Phone,
   Heart,
 } from 'lucide-react';
+import AuthPanel from './AuthPanel';
 
 const nav = [
   { to: '/ask', label: 'Ask', icon: MessageCircle },
@@ -51,6 +52,8 @@ export default function Layout() {
             </NavLink>
           ))}
         </nav>
+
+        <AuthPanel />
 
         {/* Footer */}
         <div className="p-4 border-t border-slate-200">

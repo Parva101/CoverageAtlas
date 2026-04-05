@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
   GitCompareArrows,
   Loader2,
@@ -11,8 +11,9 @@ import {
   Sparkles,
   TrendingUp,
 } from 'lucide-react';
-import { getPlanMetadata, postCompare } from '../../api/client';
+import { postCompare } from '../../api/client';
 import type { CompareRow, CoverageStatus, MetadataPlan } from '../../types';
+import { usePlanMetadata } from '../../hooks/usePlanMetadata';
 
 type CoverageLevel = 'covered' | 'restricted' | 'not_covered' | 'unclear';
 
@@ -76,14 +77,7 @@ interface PlanResult {
   summary: string;
 }
 
-interface TableRowModel {
-  result: PlanResult;
-  priorAuthLabel: string;
-  priorAuthClass: string;
-  stepTherapyLabel: string;
-  stepTherapyClass: string;
-  notes: string;
-}
+
 
 function statusToLevel(status: CoverageStatus): CoverageLevel {
   if (status === 'covered') return 'covered';
@@ -128,13 +122,6 @@ function emptyRow(planId: string): CompareRow {
   };
 }
 
-function coverageDot(level: CoverageLevel): string {
-  if (level === 'covered') return 'bg-emerald-400';
-  if (level === 'restricted') return 'bg-amber-400';
-  if (level === 'not_covered') return 'bg-red-400';
-  return 'bg-slate-400';
-}
-
 function authRequirement(value: boolean | null): { label: string; className: string } {
   if (value === true) return { label: 'Required', className: 'text-amber-300' };
   if (value === false) return { label: 'No', className: 'text-emerald-300' };
@@ -145,19 +132,6 @@ function summaryNote(row: CompareRow): string {
   if (row.criteria_summary.length > 0) return row.criteria_summary[0];
   if (row.site_of_care_text) return row.site_of_care_text;
   return statusText(row.coverage_status);
-}
-
-function toTableRowModel(result: PlanResult): TableRowModel {
-  const priorAuth = authRequirement(result.row.prior_auth_required);
-  const stepTherapy = authRequirement(result.row.step_therapy_required);
-  return {
-    result,
-    priorAuthLabel: priorAuth.label,
-    priorAuthClass: priorAuth.className,
-    stepTherapyLabel: stepTherapy.label,
-    stepTherapyClass: stepTherapy.className,
-    notes: summaryNote(result.row),
-  };
 }
 
 function StatusPill({ label, value }: { label: string; value: boolean | null }) {
@@ -183,7 +157,7 @@ function ResultCard({
   const citation = result.row.citations[0];
 
   return (
-    <div className={`rounded-2xl border-2 ${cfg.border} ${cfg.bg} p-5 flex-1 space-y-3 transition-all`}>
+    <div className={`rounded-2xl border ${cfg.border} ${cfg.bg} backdrop-blur-sm p-5 flex-1 space-y-3 transition-all shadow-md hover:shadow-lg`}>
       {/* Tags */}
       <div className="flex items-center gap-2 flex-wrap">
         {tag === 'yours' && (
@@ -241,9 +215,7 @@ function ResultCard({
 }
 
 export default function ComparePlans() {
-  const [plans, setPlans] = useState<MetadataPlan[]>([]);
-  const [loadingPlans, setLoadingPlans] = useState(true);
-  const [metadataError, setMetadataError] = useState('');
+  const { plans, loading: loadingPlans, error: metadataError } = usePlanMetadata();
 
   const [drugName, setDrugName] = useState('');
   const [myPlanId, setMyPlanId] = useState('');
@@ -252,30 +224,6 @@ export default function ComparePlans() {
   const [bestResult, setBestResult] = useState<PlanResult | null>(null);
   const [allResults, setAllResults] = useState<PlanResult[]>([]);
   const [error, setError] = useState('');
-
-  useEffect(() => {
-    let mounted = true;
-    const loadMetadata = async () => {
-      setLoadingPlans(true);
-      setMetadataError('');
-      try {
-        const metadata = await getPlanMetadata();
-        if (!mounted) return;
-        setPlans(metadata.plans);
-      } catch {
-        if (!mounted) return;
-        setPlans([]);
-        setMetadataError('Unable to load plans right now.');
-      } finally {
-        if (mounted) setLoadingPlans(false);
-      }
-    };
-
-    loadMetadata();
-    return () => {
-      mounted = false;
-    };
-  }, []);
 
   const planById = useMemo(() => {
     const byId = new Map<string, MetadataPlan>();
@@ -347,39 +295,22 @@ export default function ComparePlans() {
     myResult.row.criteria_summary.length >= bestResult.row.criteria_summary.length;
 
   return (
-    <div className="space-y-6">
+    <div className="min-h-screen">
       <div className="max-w-4xl mx-auto px-5 py-10 space-y-6">
-        <section className="app-page-hero animate-fade-in-up">
-          <div className="app-page-hero-content grid gap-4 md:grid-cols-[1.6fr_1fr] items-start">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-sky-100">Comparison Workspace</p>
-              <h1 className="mt-2 text-3xl font-semibold tracking-tight">Compare Plan Coverage</h1>
-              <p className="mt-2 max-w-lg text-sm leading-relaxed text-sky-100">
-                See how your plan stacks up against alternatives for any medication.
-              </p>
-              <div className="app-page-hero-chip mt-4 inline-flex items-center gap-2">
-                <TrendingUp className="w-3.5 h-3.5" />
-                Compare across all available plans
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-2.5">
-              <div className="app-page-hero-stat">
-                <p>Plans</p>
-                <p className="mt-1 text-lg font-semibold">{loadingPlans ? '...' : plans.length}</p>
-              </div>
-              <div className="app-page-hero-stat">
-                <p>Mode</p>
-                <p className="mt-1 text-sm font-semibold">Plan Compare</p>
-              </div>
-              <div className="app-page-hero-stat col-span-2">
-                Coverage status, prior auth, and step-therapy insights in one view.
-              </div>
-            </div>
+        {/* Header */}
+        <div className="text-center animate-fade-in-up">
+          <div className="inline-flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-blue-50 to-indigo-50 text-blue-700 rounded-full text-xs font-semibold mb-5 border border-blue-200/50 shadow-sm">
+            <TrendingUp className="w-3.5 h-3.5" />
+            Compare across all available plans
           </div>
-        </section>
+          <h1 className="text-3xl sm:text-4xl font-bold text-slate-900 tracking-tight glow-heading">Compare Plan Coverage</h1>
+          <p className="text-slate-500 mt-3 text-sm leading-relaxed max-w-lg mx-auto">
+            See how your plan stacks up against alternatives for any medication.
+          </p>
+        </div>
 
         {/* Form card */}
-        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-5 space-y-4 animate-fade-in-up stagger-1">
+        <div className="glass-card p-5 space-y-4 animate-fade-in-up stagger-1">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2 block">
@@ -420,7 +351,7 @@ export default function ComparePlans() {
           <button
             onClick={handleCompare}
             disabled={loading || !drugName.trim() || !myPlanId}
-            className="w-full py-3 bg-blue-600 text-white text-sm font-semibold rounded-xl hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 transition-all hover:shadow-lg hover:shadow-blue-500/20 active:scale-[0.99]"
+            className="w-full py-3 bg-gradient-to-r from-blue-600 to-indigo-600 text-white text-sm font-semibold rounded-xl hover:from-blue-500 hover:to-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 transition-all hover:shadow-xl hover:shadow-blue-500/25 active:scale-[0.99]"
           >
             {loading ? (
               <Loader2 className="w-4 h-4 animate-spin" />
@@ -531,7 +462,7 @@ export default function ComparePlans() {
 
         {/* Disclaimer */}
         {!loading && allResults.length > 0 && (
-          <section className="rounded-2xl border border-slate-800 bg-slate-950 text-slate-100 shadow-xl overflow-hidden animate-fade-in-up">
+          <section className="rounded-2xl border border-slate-800 bg-slate-950 text-slate-100 shadow-2xl overflow-hidden animate-fade-in-scale">
             <div className="px-5 py-4 border-b border-slate-800">
               <h3 className="text-xl font-semibold">{drugName || 'Medication comparison'}</h3>
               <p className="text-sm text-slate-400 mt-1">
@@ -551,26 +482,32 @@ export default function ComparePlans() {
                 </thead>
                 <tbody className="divide-y divide-slate-800">
                   {allResults.map(result => {
-                    const row = toTableRowModel(result);
+                    const priorAuth = authRequirement(result.row.prior_auth_required);
+                    const stepTherapy = authRequirement(result.row.step_therapy_required);
+                    const notes = summaryNote(result.row);
+                    const dotColor = result.level === 'covered' ? 'bg-emerald-400'
+                      : result.level === 'restricted' ? 'bg-amber-400'
+                      : result.level === 'not_covered' ? 'bg-red-400'
+                      : 'bg-slate-400';
                     return (
                       <tr key={result.plan.plan_id} className="hover:bg-slate-900/40 transition-colors">
                         <td className="px-5 py-4 align-top">
                           <div className="flex items-start gap-2.5">
-                            <span className={`mt-1.5 h-2.5 w-2.5 rounded-full ${coverageDot(result.level)}`} />
+                            <span className={`mt-1.5 h-2.5 w-2.5 rounded-full ${dotColor}`} />
                             <div>
                               <p className="text-base font-semibold text-slate-100">{result.plan.payer_name}</p>
                               <p className="text-base font-medium text-slate-200">{result.plan.plan_name}</p>
                             </div>
                           </div>
                         </td>
-                        <td className={`px-4 py-4 align-top text-sm font-semibold ${row.priorAuthClass}`}>
-                          {row.priorAuthLabel}
+                        <td className={`px-4 py-4 align-top text-sm font-semibold ${priorAuth.className}`}>
+                          {priorAuth.label}
                         </td>
-                        <td className={`px-4 py-4 align-top text-sm font-semibold ${row.stepTherapyClass}`}>
-                          {row.stepTherapyLabel}
+                        <td className={`px-4 py-4 align-top text-sm font-semibold ${stepTherapy.className}`}>
+                          {stepTherapy.label}
                         </td>
                         <td className="px-4 py-4 align-top text-sm text-slate-300 max-w-[20rem]">
-                          {row.notes}
+                          {notes}
                         </td>
                       </tr>
                     );

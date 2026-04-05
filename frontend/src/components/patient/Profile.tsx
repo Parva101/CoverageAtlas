@@ -8,9 +8,10 @@ import {
   UserRound,
   X,
 } from 'lucide-react';
-import { getMyProfile, getPlanMetadata, updateMyProfile } from '../../api/client';
+import { getMyProfile, updateMyProfile } from '../../api/client';
 import { readAuth0ProfileBootstrap } from '../../auth/profileBootstrap';
-import type { MetadataPlan, UserProfileUpdateRequest } from '../../types';
+import type { UserProfileUpdateRequest } from '../../types';
+import { usePlanMetadata } from '../../hooks/usePlanMetadata';
 
 interface ProfileFormState {
   user_id: string;
@@ -39,7 +40,7 @@ export default function Profile() {
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<string | null>(null);
 
-  const [plans, setPlans] = useState<MetadataPlan[]>([]);
+  const { plans } = usePlanMetadata();
   const [conditionInput, setConditionInput] = useState('');
   const [medicationInput, setMedicationInput] = useState('');
 
@@ -49,13 +50,12 @@ export default function Profile() {
       setLoading(true);
       setError('');
       try {
-        const [profileRes, planRes] = await Promise.all([getMyProfile(), getPlanMetadata()]);
+        const profileRes = await getMyProfile();
         if (!mounted) return;
         const bootstrap = readAuth0ProfileBootstrap();
         const fullName = profileRes.profile.full_name || bootstrap?.fullName || '';
         const email = profileRes.profile.email || bootstrap?.email || '';
         const phone = profileRes.profile.phone || bootstrap?.phone || '';
-        setPlans(planRes.plans);
         setForm({
           user_id: profileRes.profile.user_id,
           full_name: fullName,
@@ -92,10 +92,9 @@ export default function Profile() {
           };
           void updateMyProfile(syncPayload).catch(() => undefined);
         }
-      } catch (e: unknown) {
+      } catch {
         if (!mounted) return;
-        const message = e instanceof Error ? e.message : 'Unable to load profile details right now.';
-        setError(message);
+        setError('Unable to load profile details right now.');
       } finally {
         if (mounted) setLoading(false);
       }
@@ -201,7 +200,7 @@ export default function Profile() {
     }
   };
 
-  if (loading) {
+  if (loading || !form) {
     return (
       <div className="app-surface py-12 text-center">
         <Loader2 className="mx-auto h-8 w-8 animate-spin text-blue-600" />
@@ -210,25 +209,15 @@ export default function Profile() {
     );
   }
 
-  if (!form) {
-    return (
-      <div className="app-surface space-y-3 border-red-200 bg-red-50/70 p-6 text-center">
-        <p className="text-sm font-medium text-red-800">We could not load your profile.</p>
-        <p className="text-xs text-red-700">{error || 'Please check auth/backend connectivity and try again.'}</p>
-        <button onClick={() => window.location.reload()} className="app-button-secondary">
-          Retry
-        </button>
-      </div>
-    );
-  }
-
   return (
     <div className="space-y-6">
-      <section className="app-page-hero">
-        <div className="app-page-hero-content">
-          <p className="text-xs font-semibold uppercase tracking-[0.15em] text-sky-100">Personal Workspace</p>
-          <h1 className="mt-2 text-3xl font-semibold">Your Profile</h1>
-          <p className="mt-2 max-w-2xl text-sm leading-relaxed text-sky-100">
+      <section className="relative overflow-hidden rounded-2xl border border-cyan-200/40 bg-gradient-to-r from-cyan-600 via-teal-600 to-cyan-700 p-7 text-white shadow-xl shadow-cyan-500/10">
+        <div className="absolute -top-20 -right-20 h-60 w-60 rounded-full bg-white/5 blur-2xl" />
+        <div className="absolute -bottom-16 -left-16 h-48 w-48 rounded-full bg-cyan-300/10 blur-2xl" />
+        <div className="relative">
+          <p className="text-xs font-semibold uppercase tracking-[0.15em] text-cyan-100">Personal Workspace</p>
+          <h1 className="mt-2 text-3xl sm:text-4xl font-bold tracking-tight">Your Profile</h1>
+          <p className="mt-2 max-w-2xl text-sm leading-relaxed text-cyan-100">
             Each user keeps their own profile, plan context, and care preferences so responses stay relevant and personal.
           </p>
         </div>

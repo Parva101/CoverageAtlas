@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ArrowRightLeft, Loader2, PiggyBank, TrendingDown, TrendingUp } from 'lucide-react';
-import { getPlanMetadata } from '../../../api/client';
-import type { MetadataPlan } from '../../../types';
+import { ArrowRightLeft, Loader2, PiggyBank, ShieldAlert, TrendingDown, TrendingUp } from 'lucide-react';
+import { getPlanMetadata, postCompare } from '../../../api/client';
+import type { CompareResponse, MetadataPlan } from '../../../types';
 
 interface SimulatorInputs {
   currentPlanId: string;
@@ -61,6 +61,26 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
 
+function coveragePenalty(status: string): number {
+  switch (status) {
+    case 'covered':
+      return 0;
+    case 'restricted':
+      return 280;
+    case 'unknown':
+      return 450;
+    case 'not_covered':
+      return 1000;
+    default:
+      return 400;
+  }
+}
+
+function formatCoverage(status?: string): string {
+  if (!status) return 'unknown';
+  return status.replace(/_/g, ' ');
+}
+
 function calculatePlanCost(input: {
   monthlyPremium: number;
   deductible: number;
@@ -93,6 +113,11 @@ export default function PlanSwitchSimulator() {
   const [plans, setPlans] = useState<MetadataPlan[]>([]);
   const [loadingPlans, setLoadingPlans] = useState(true);
   const [metadataError, setMetadataError] = useState('');
+  const [drugName, setDrugName] = useState('Wegovy');
+  const [effectiveOn, setEffectiveOn] = useState('');
+  const [compareResult, setCompareResult] = useState<CompareResponse | null>(null);
+  const [compareLoading, setCompareLoading] = useState(false);
+  const [compareError, setCompareError] = useState('');
 
   const [inputs, setInputs] = useState<SimulatorInputs>({
     currentPlanId: '',
@@ -187,15 +212,42 @@ export default function PlanSwitchSimulator() {
   const financialDelta = targetBreakdown.totalAnnualCost - currentBreakdown.totalAnnualCost;
   const riskPenalty = inputs.networkDisruptionRiskPct * 30;
   const adjustedDelta = financialDelta + riskPenalty;
+  const currentCoverage = compareResult?.rows.find(row => row.plan_id === inputs.currentPlanId);
+  const targetCoverage = compareResult?.rows.find(row => row.plan_id === inputs.targetPlanId);
+  const coverageDeltaPenalty =
+    currentCoverage && targetCoverage
+      ? coveragePenalty(targetCoverage.coverage_status) - coveragePenalty(currentCoverage.coverage_status)
+      : 0;
+  const coverageAdjustedDelta = adjustedDelta + coverageDeltaPenalty;
   const recommendation =
-    adjustedDelta < -400
+    coverageAdjustedDelta < -400
       ? 'Switch likely saves money even after accounting for disruption risk.'
-      : adjustedDelta > 400
+      : coverageAdjustedDelta > 400
         ? 'Switch may increase annual cost; validate clinical and network reasons first.'
         : 'Costs are close. Use coverage quality and provider network fit as decision drivers.';
 
   const currentPlan = plans.find(plan => plan.plan_id === inputs.currentPlanId);
   const targetPlan = plans.find(plan => plan.plan_id === inputs.targetPlanId);
+
+  const runPolicyCompare = async () => {
+    if (!inputs.currentPlanId || !inputs.targetPlanId || !drugName.trim()) return;
+    setCompareLoading(true);
+    setCompareError('');
+    try {
+      const result = await postCompare({
+        drug_name: drugName.trim(),
+        plan_ids: [inputs.currentPlanId, inputs.targetPlanId],
+        effective_on: effectiveOn || undefined,
+      });
+      setCompareResult(result);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to fetch live coverage comparison.';
+      setCompareError(message);
+      setCompareResult(null);
+    } finally {
+      setCompareLoading(false);
+    }
+  };
 
   return (
     <div className="space-y-4">
@@ -241,6 +293,40 @@ export default function PlanSwitchSimulator() {
               </select>
             </div>
           </div>
+
+          <div className="rounded-xl border border-indigo-200/70 bg-indigo-50/40 p-3">
+            <p className="text-xs font-semibold uppercase tracking-[0.1em] text-indigo-700">Live policy comparison</p>
+            <div className="mt-2 grid gap-3 md:grid-cols-[1fr_180px_auto]">
+              <input
+                type="text"
+                value={drugName}
+                onChange={event => setDrugName(event.target.value)}
+                placeholder="Drug or service name"
+                className="app-input"
+              />
+              <input
+                type="date"
+                value={effectiveOn}
+                onChange={event => setEffectiveOn(event.target.value)}
+                className="app-input"
+              />
+              <button
+                onClick={() => void runPolicyCompare()}
+                disabled={compareLoading || !drugName.trim()}
+                className="app-button-secondary disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                {compareLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRightLeft className="h-4 w-4" />}
+                Run Compare
+              </button>
+            </div>
+            {compareError && <p className="mt-2 text-xs text-rose-700">{compareError}</p>}
+            {compareResult && (
+              <p className="mt-2 text-xs text-slate-600">
+                Coverage evidence loaded for {compareResult.drug_name}.
+              </p>
+            )}
+          </div>
+
           {loadingPlans && (
             <p className="flex items-center gap-2 text-xs text-slate-500">
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -433,6 +519,13 @@ export default function PlanSwitchSimulator() {
               <p className="mt-1 text-sm font-semibold text-slate-800">{currency(adjustedDelta)}</p>
               <p className="mt-1 text-xs text-slate-500">includes network disruption penalty</p>
             </div>
+            {compareResult && (
+              <div className="mt-3 rounded-xl border border-slate-200 bg-white p-3">
+                <p className="text-xs text-slate-500">Coverage-adjusted delta</p>
+                <p className="mt-1 text-sm font-semibold text-slate-800">{currency(coverageAdjustedDelta)}</p>
+                <p className="mt-1 text-xs text-slate-500">includes live policy coverage penalty</p>
+              </div>
+            )}
           </div>
 
           <div className="app-surface p-5">
@@ -447,6 +540,22 @@ export default function PlanSwitchSimulator() {
                 Target: {targetPlan ? `${targetPlan.plan_name} (${targetPlan.payer_name})` : 'Not selected'}
               </p>
             </div>
+            {compareResult && currentCoverage && targetCoverage && (
+              <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700">
+                <p className="font-semibold text-slate-800">Live coverage signal ({compareResult.drug_name})</p>
+                <p className="mt-1">
+                  Current: <span className="font-medium">{formatCoverage(currentCoverage.coverage_status)}</span>
+                </p>
+                <p>
+                  Target: <span className="font-medium">{formatCoverage(targetCoverage.coverage_status)}</span>
+                </p>
+                {!!targetCoverage.criteria_summary?.length && (
+                  <p className="mt-1 text-slate-600">
+                    Target criteria: {targetCoverage.criteria_summary.slice(0, 2).join(' | ')}
+                  </p>
+                )}
+              </div>
+            )}
           </div>
 
           <div className="app-surface border-amber-200 bg-amber-50/80 p-4">
@@ -454,6 +563,12 @@ export default function PlanSwitchSimulator() {
               <PiggyBank className="h-3.5 w-3.5 text-amber-700" />
               Simulation is for planning only and does not replace official plan documents or broker advice.
             </p>
+            {compareResult && (
+              <p className="mt-1 flex items-center gap-1.5 text-xs text-amber-900">
+                <ShieldAlert className="h-3.5 w-3.5 text-amber-700" />
+                Coverage statuses are pulled from policy data and should still be confirmed with your plan.
+              </p>
+            )}
           </div>
         </aside>
       </div>

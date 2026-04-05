@@ -1,5 +1,8 @@
 import { useMemo, useState } from 'react';
-import { CheckCircle2, Route, ShieldCheck, Sparkles } from 'lucide-react';
+import { CheckCircle2, Loader2, Route, ShieldCheck, Sparkles } from 'lucide-react';
+import { postQuery } from '../../../api/client';
+import { usePlanMetadata } from '../../../hooks/usePlanMetadata';
+import type { QueryResponse } from '../../../types';
 
 type DenialType =
   | 'prior_auth_missing'
@@ -343,8 +346,38 @@ function laneStyle(lane: Strategy['lane']): string {
   return 'bg-emerald-100 text-emerald-700';
 }
 
+function buildPolicyQuestion(denialLabel: string, serviceName: string): string {
+  return [
+    `For this denial scenario: "${denialLabel}"`,
+    `for service/drug "${serviceName}", identify the best access strategy.`,
+    'Explain what evidence will strengthen approval and the highest-impact next 3 steps.',
+  ].join(' ');
+}
+
+function policyLaneBoost(strategy: Strategy, analysis: QueryResponse | null): number {
+  if (!analysis) return 0;
+  const answer = analysis.answer.toLowerCase();
+  let boost = Math.round((analysis.confidence || 0) * 12) + Math.min(analysis.citations.length, 4) * 2;
+
+  if (strategy.lane === 'administrative' && /(prior auth|authorization|appeal|resubmit)/.test(answer)) {
+    boost += 6;
+  }
+  if (strategy.lane === 'clinical' && /(medical necessity|clinical|guideline|specialist|peer)/.test(answer)) {
+    boost += 6;
+  }
+  if (strategy.lane === 'financial' && /(copay|assistance|bridge|cost|afford)/.test(answer)) {
+    boost += 6;
+  }
+  if (/insufficient evidence/.test(answer)) {
+    boost -= 8;
+  }
+  return Math.max(-10, Math.min(14, boost));
+}
+
 export default function NextBestAccess() {
   const [denialType, setDenialType] = useState<DenialType>('prior_auth_missing');
+  const [serviceName, setServiceName] = useState('Wegovy');
+  const [payerId, setPayerId] = useState('');
   const [evidence, setEvidence] = useState<EvidenceState>({
     hasRecentLabs: true,
     hasFailedAlternatives: true,
@@ -353,6 +386,10 @@ export default function NextBestAccess() {
     hasUrgencyFlag: false,
     hasContinuityOfCare: true,
   });
+  const { payers, loading: loadingMetadata, error: metadataError } = usePlanMetadata();
+  const [analysis, setAnalysis] = useState<QueryResponse | null>(null);
+  const [analysisLoading, setAnalysisLoading] = useState(false);
+  const [analysisError, setAnalysisError] = useState('');
 
   const scoredStrategies = useMemo(() => {
     const base = STRATEGIES_BY_DENIAL[denialType];
@@ -362,13 +399,32 @@ export default function NextBestAccess() {
           (sum, req) => sum + (evidence[req.key] ? req.bonus : 0),
           0,
         );
-        const score = Math.min(98, strategy.baseScore + evidenceBonus);
-        return { ...strategy, score };
+        const policyBoost = policyLaneBoost(strategy, analysis);
+        const score = Math.max(0, Math.min(98, strategy.baseScore + evidenceBonus + policyBoost));
+        return { ...strategy, score, policyBoost };
       })
       .sort((a, b) => b.score - a.score);
-  }, [denialType, evidence]);
+  }, [denialType, evidence, analysis]);
 
   const top = scoredStrategies[0];
+
+  const runPolicyAnalysis = async () => {
+    setAnalysisLoading(true);
+    setAnalysisError('');
+    try {
+      const response = await postQuery({
+        question: buildPolicyQuestion(DENIAL_LABELS[denialType], serviceName.trim() || 'requested therapy'),
+        filters: payerId ? { payer_ids: [payerId] } : undefined,
+      });
+      setAnalysis(response);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to retrieve policy evidence.';
+      setAnalysisError(message);
+      setAnalysis(null);
+    } finally {
+      setAnalysisLoading(false);
+    }
+  };
 
   return (
     <div className="space-y-4">
@@ -430,6 +486,41 @@ export default function NextBestAccess() {
               })}
             </div>
           </div>
+
+          <div className="rounded-xl border border-blue-200 bg-blue-50/50 p-3">
+            <p className="text-xs font-semibold uppercase tracking-[0.1em] text-blue-700">Policy evidence calibration</p>
+            <div className="mt-2 grid gap-2 md:grid-cols-2">
+              <input
+                value={serviceName}
+                onChange={event => setServiceName(event.target.value)}
+                placeholder="Drug / service (e.g. Wegovy)"
+                className="app-input"
+              />
+              <select
+                value={payerId}
+                onChange={event => setPayerId(event.target.value)}
+                className="app-input"
+                disabled={loadingMetadata}
+              >
+                <option value="">All payers</option>
+                {payers.map(payer => (
+                  <option key={payer.payer_id} value={payer.payer_id}>
+                    {payer.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <button
+              onClick={() => void runPolicyAnalysis()}
+              disabled={analysisLoading}
+              className="mt-2 app-button-secondary disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              {analysisLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+              Analyze with policy data
+            </button>
+            {metadataError && <p className="mt-2 text-xs text-amber-700">{metadataError}</p>}
+            {analysisError && <p className="mt-2 text-xs text-rose-700">{analysisError}</p>}
+          </div>
         </div>
 
         <div className="app-surface p-5">
@@ -456,6 +547,11 @@ export default function NextBestAccess() {
                     />
                   </div>
                 </div>
+                {analysis && (
+                  <p className="mt-2 text-xs text-slate-600">
+                    Policy signal boost applied from live evidence and confidence.
+                  </p>
+                )}
               </div>
               <ul className="space-y-2">
                 {top.steps.map(step => (
@@ -497,6 +593,12 @@ export default function NextBestAccess() {
                 <div className="text-right">
                   <p className="text-xs text-slate-500">Readiness score</p>
                   <p className="text-lg font-semibold text-slate-800">{strategy.score}%</p>
+                  {analysis && (
+                    <p className="text-[11px] text-slate-500">
+                      Policy boost {strategy.policyBoost >= 0 ? '+' : ''}
+                      {strategy.policyBoost}
+                    </p>
+                  )}
                 </div>
               </div>
               <div className="mt-3 h-1.5 rounded-full bg-slate-200">
@@ -517,6 +619,19 @@ export default function NextBestAccess() {
           ))}
         </div>
       </div>
+
+      {analysis && (
+        <div className="app-surface p-5">
+          <h4 className="text-sm font-semibold uppercase tracking-[0.1em] text-slate-500">Live policy evidence used</h4>
+          <p className="mt-2 text-sm text-slate-700">{analysis.answer}</p>
+          {!!analysis.citations.length && (
+            <p className="mt-2 text-xs text-slate-500">
+              Source: {analysis.citations[0].section || 'Policy text'}
+              {analysis.citations[0].page ? ` - p.${analysis.citations[0].page}` : ''}
+            </p>
+          )}
+        </div>
+      )}
 
       <div className="app-surface border-amber-200 bg-amber-50/80 p-4 text-xs text-amber-900">
         <p className="flex items-center gap-1.5">

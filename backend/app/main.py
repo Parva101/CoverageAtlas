@@ -37,6 +37,14 @@ EMBEDDING_DIM = int(os.environ.get("EMBEDDING_DIM", "768"))
 QA_MODEL = os.environ.get("QA_MODEL", "gemini-2.5-flash")
 QA_TEMPERATURE = float(os.environ.get("QA_TEMPERATURE", "0.2"))
 QA_MAX_OUTPUT_TOKENS = int(os.environ.get("QA_MAX_OUTPUT_TOKENS", "2048"))
+REQUIRED_PROFILE_FIELDS = tuple(
+    field.strip()
+    for field in os.environ.get(
+        "CHATBOT_REQUIRED_PROFILE_FIELDS",
+        "full_name,date_of_birth,state,member_id,primary_plan_id",
+    ).split(",")
+    if field.strip()
+)
 
 SOURCE_SCAN_RUNS: dict[str, dict[str, Any]] = {}
 
@@ -229,6 +237,19 @@ def _resolve_retrieval_scope(filters: QueryFilters) -> dict[str, Any]:
             for plan in resolved_plans:
                 payer_ids.add(str(plan["payer_id"]))
 
+            # Fallback for "virtual plan ids" (metadata fallback mode):
+            # when plans table is empty, frontend uses payer IDs as plan IDs.
+            if resolved_plans_count == 0:
+                payer_rows = db_layer.fetchall(
+                    conn,
+                    "SELECT id, name FROM payers WHERE id::text = ANY(%s)",
+                    (plan_ids,),
+                )
+                if payer_rows:
+                    resolved_plans_count = len(payer_rows)
+                    for row in payer_rows:
+                        payer_ids.add(str(row["id"]))
+
         if plan_ids and resolved_plans_count == 0 and not input_payer_ids:
             return {
                 "plan_ids": plan_ids,
@@ -406,7 +427,12 @@ def build_citations(chunks: list[dict]) -> list[dict]:
     return citations
 
 
-def build_answer(question: str, chunks: list[dict], citations: list[dict]) -> tuple[str, float]:
+def build_answer(
+    question: str,
+    chunks: list[dict],
+    citations: list[dict],
+    profile_context: Optional[str] = None,
+) -> tuple[str, float]:
     if not chunks:
         return "Insufficient evidence to answer based on available policy sources.", 0.0
 
@@ -423,6 +449,7 @@ def build_answer(question: str, chunks: list[dict], citations: list[dict]) -> tu
         "You are a policy assistant. Answer ONLY from evidence.\n"
         "If evidence is weak, say insufficient evidence.\n"
         "Keep answer concise and plain-language.\n\n"
+        f"Patient profile context (if provided): {profile_context or 'not provided'}\n\n"
         f"Question: {question}\n\n"
         f"Evidence:\n{context}\n"
     )
@@ -445,6 +472,149 @@ def _resolve_request_user_id(claims: AuthClaims, fallback: Optional[str] = None)
     if sub:
         return sub
     return str(fallback or "anonymous")
+
+
+def _is_missing_profile_value(value: Any) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, str):
+        return not value.strip()
+    if isinstance(value, (list, tuple, dict, set)):
+        return len(value) == 0
+    return False
+
+
+def _merge_claims_into_profile(profile: Optional[dict], claims: AuthClaims, user_id: str) -> dict[str, Any]:
+    merged = dict(profile or {})
+    merged["user_id"] = user_id
+    if _is_missing_profile_value(merged.get("full_name")) and claims.get("name"):
+        merged["full_name"] = str(claims.get("name"))
+    if _is_missing_profile_value(merged.get("email")) and claims.get("email"):
+        merged["email"] = str(claims.get("email"))
+    return merged
+
+
+def _profile_field_label(field: str) -> str:
+    labels = {
+        "full_name": "full name",
+        "email": "email",
+        "phone": "phone",
+        "date_of_birth": "date of birth",
+        "state": "state",
+        "member_id": "member ID",
+        "preferred_language": "preferred language",
+        "preferred_channel": "preferred channel",
+        "primary_plan_id": "primary plan",
+        "chronic_conditions": "chronic conditions",
+        "medications": "medications",
+        "notes": "notes",
+    }
+    return labels.get(field, field.replace("_", " "))
+
+
+def _required_profile_fields_for_question(question: str) -> list[str]:
+    q = (question or "").strip().lower()
+    required = list(REQUIRED_PROFILE_FIELDS)
+
+    # Require condition context for diagnosis-driven questions.
+    if any(token in q for token in ("condition", "diagnosis", "diagnoses", "for my disease", "for my case")):
+        if "chronic_conditions" not in required:
+            required.append("chronic_conditions")
+    return required
+
+
+def _missing_profile_fields(profile: dict[str, Any], question: str) -> list[str]:
+    required = _required_profile_fields_for_question(question)
+    missing: list[str] = []
+    for field in required:
+        if _is_missing_profile_value(profile.get(field)):
+            missing.append(field)
+    return missing
+
+
+def _profile_summary_payload(profile: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "full_name": profile.get("full_name"),
+        "email": profile.get("email"),
+        "phone": profile.get("phone"),
+        "date_of_birth": profile.get("date_of_birth"),
+        "state": profile.get("state"),
+        "member_id": profile.get("member_id"),
+        "primary_plan_id": profile.get("primary_plan_id"),
+        "chronic_conditions": profile.get("chronic_conditions") or [],
+        "medications": profile.get("medications") or [],
+    }
+
+
+def _profile_gate_response(missing_fields: list[str], profile: dict[str, Any], user_id: str) -> dict[str, Any]:
+    labels = [_profile_field_label(field) for field in missing_fields]
+    if len(labels) == 1:
+        fields_sentence = labels[0]
+    elif len(labels) == 2:
+        fields_sentence = f"{labels[0]} and {labels[1]}"
+    else:
+        fields_sentence = f"{', '.join(labels[:-1])}, and {labels[-1]}"
+
+    answer = (
+        "Before I can give a policy answer for your exact case, I need a complete patient profile. "
+        f"Please provide {fields_sentence}. "
+        "You can update these in My Profile, then ask your question again."
+    )
+    return {
+        "answer": answer,
+        "confidence": 0.0,
+        "citations": [],
+        "retrieval_trace": {
+            "chunks_used": 0,
+            "vector_store": "qdrant",
+            "applied_filters": {},
+            "profile_gate": True,
+        },
+        "disclaimer": "Informational only. Final decision depends on plan-specific review.",
+        "needs_profile_completion": True,
+        "missing_profile_fields": missing_fields,
+        "missing_profile_field_labels": labels,
+        "profile_completion_url": "/profile",
+        "user_id": user_id,
+        "profile_snapshot": _profile_summary_payload(profile),
+    }
+
+
+def _inject_profile_into_filters(filters: QueryFilters, profile: dict[str, Any]) -> QueryFilters:
+    merged = filters.model_copy(deep=True)
+    if not merged.plan_ids:
+        primary_plan_id = str(profile.get("primary_plan_id") or "").strip()
+        if primary_plan_id:
+            merged.plan_ids = [primary_plan_id]
+    return merged
+
+
+def _build_profile_context(profile: dict[str, Any]) -> str:
+    context_parts: list[str] = []
+    full_name = str(profile.get("full_name") or "").strip()
+    date_of_birth = str(profile.get("date_of_birth") or "").strip()
+    state = str(profile.get("state") or "").strip()
+    member_id = str(profile.get("member_id") or "").strip()
+    primary_plan_id = str(profile.get("primary_plan_id") or "").strip()
+    chronic_conditions = profile.get("chronic_conditions") or []
+    medications = profile.get("medications") or []
+
+    if full_name:
+        context_parts.append(f"name={full_name}")
+    if date_of_birth:
+        context_parts.append(f"date_of_birth={date_of_birth}")
+    if state:
+        context_parts.append(f"state={state}")
+    if member_id:
+        context_parts.append(f"member_id={member_id}")
+    if primary_plan_id:
+        context_parts.append(f"primary_plan_id={primary_plan_id}")
+    if chronic_conditions:
+        context_parts.append(f"chronic_conditions={', '.join(str(v) for v in chronic_conditions)}")
+    if medications:
+        context_parts.append(f"medications={', '.join(str(v) for v in medications)}")
+
+    return "; ".join(context_parts)
 
 
 def _session_owned_by_user(conn, session_id: str, user_id: str) -> bool:
@@ -750,16 +920,27 @@ def document_status(
 @app.post(f"{API_PREFIX}/query")
 def query(
     req: QueryRequest,
-    _auth: AuthClaims = Depends(require_auth0_token),
+    auth: AuthClaims = Depends(require_auth0_token),
 ):
     if not req.question.strip():
         return error_response(400, "VALIDATION_ERROR", "question is required")
 
+    user_id = _resolve_request_user_id(auth)
+    with db_layer.get_conn() as conn:
+        raw_profile = db_layer.get_user_profile(conn, user_id)
+    profile = _merge_claims_into_profile(raw_profile, auth, user_id)
+    missing_profile_fields = _missing_profile_fields(profile, req.question)
+    if missing_profile_fields:
+        return _profile_gate_response(missing_profile_fields, profile, user_id)
+
+    filters = _inject_profile_into_filters(req.filters, profile)
+    profile_context = _build_profile_context(profile)
+
     try:
         top_k = max(1, min(req.retrieval.top_k, 20))
-        chunks, scope = retrieve_chunks(req.question, req.filters, top_k)
+        chunks, scope = retrieve_chunks(req.question, filters, top_k)
         citations = build_citations(chunks)
-        answer, confidence = build_answer(req.question, chunks, citations)
+        answer, confidence = build_answer(req.question, chunks, citations, profile_context=profile_context)
     except Exception as exc:
         return error_response(500, "INTERNAL_ERROR", "Query processing failed", {"reason": str(exc)})
 
@@ -781,6 +962,10 @@ def query(
             },
         },
         "disclaimer": "Informational only. Final decision depends on plan-specific review.",
+        "needs_profile_completion": False,
+        "missing_profile_fields": [],
+        "profile_completion_url": "/profile",
+        "profile_snapshot": _profile_summary_payload(profile),
     }
 
 

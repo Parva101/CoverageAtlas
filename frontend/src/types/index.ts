@@ -35,6 +35,21 @@ export interface QueryResponse {
   answer: string;
   confidence: number;
   citations: Citation[];
+  needs_profile_completion?: boolean;
+  missing_profile_fields?: string[];
+  missing_profile_field_labels?: string[];
+  profile_completion_url?: string;
+  profile_snapshot?: {
+    full_name?: string | null;
+    email?: string | null;
+    phone?: string | null;
+    date_of_birth?: string | null;
+    state?: string | null;
+    member_id?: string | null;
+    primary_plan_id?: string | null;
+    chronic_conditions?: string[];
+    medications?: string[];
+  };
   retrieval_trace: {
     chunks_used: number;
     vector_store: string;

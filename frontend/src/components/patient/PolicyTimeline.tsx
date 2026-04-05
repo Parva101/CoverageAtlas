@@ -253,13 +253,15 @@ export default function PolicyTimeline() {
 
   return (
     <div className="space-y-6">
-      <section className="app-page-hero">
-        <div className="app-page-hero-content">
-          <p className="text-xs font-semibold uppercase tracking-[0.15em] text-sky-100">Patch Notes</p>
-          <h1 className="mt-2 text-3xl font-semibold">Policy Update Timeline</h1>
-          <p className="mt-2 max-w-2xl text-sm leading-relaxed text-sky-100">
-            See policy changes in an update-feed style experience, then run deep version-to-version comparisons below.
-          </p>
+      <section className="app-surface relative overflow-hidden border-indigo-100/90 bg-gradient-to-r from-indigo-600 to-blue-600 p-7 text-white shadow-xl shadow-indigo-500/10">
+        <div className="absolute -top-20 -right-20 h-60 w-60 rounded-full bg-white/10 blur-2xl" />
+        <div className="absolute -bottom-16 -left-16 h-48 w-48 rounded-full bg-blue-300/15 blur-2xl" />
+        <div className="relative">
+        <p className="text-xs font-semibold uppercase tracking-[0.15em] text-indigo-100">Patch Notes</p>
+        <h1 className="mt-2 text-3xl sm:text-4xl font-bold tracking-tight">Policy Update Timeline</h1>
+        <p className="mt-2 max-w-2xl text-sm leading-relaxed text-indigo-100">
+          See policy changes in an update-feed style experience, then run deep version-to-version comparisons below.
+        </p>
         </div>
       </section>
 
@@ -319,7 +321,7 @@ export default function PolicyTimeline() {
         )}
 
         {!loadingRecent && groupedUpdates.length === 0 && (
-          <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
+          <div className="rounded-xl border border-slate-200/60 bg-white/60 backdrop-blur-sm p-4 text-sm text-slate-600">
             No updates available for this filter.
           </div>
         )}
@@ -459,7 +461,7 @@ export default function PolicyTimeline() {
             </select>
           </div>
 
-          <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+          <div className="glass-card p-3">
             <p className="text-xs font-semibold uppercase tracking-[0.1em] text-slate-500">Selected Policy</p>
             <p className="mt-1 text-sm font-semibold text-slate-800">{selectedPolicy?.policy_title || 'None'}</p>
             <p className="mt-1 text-xs text-slate-500">{selectedPolicy?.payer_name || 'Choose a policy to continue'}</p>

@@ -1,5 +1,8 @@
 import { useMemo, useState } from 'react';
-import { AlertTriangle, ShieldAlert, ShieldCheck, TrendingDown } from 'lucide-react';
+import { AlertTriangle, Loader2, ShieldAlert, ShieldCheck, TrendingDown } from 'lucide-react';
+import { postQuery } from '../../../api/client';
+import { usePlanMetadata } from '../../../hooks/usePlanMetadata';
+import type { QueryResponse } from '../../../types';
 
 type DenialType =
   | 'prior_auth_missing'
@@ -63,6 +66,21 @@ function riskBarStyle(score: number): string {
   return 'from-rose-600 to-red-500';
 }
 
+function computePolicyShift(result: QueryResponse | null): number {
+  if (!result) return 0;
+  const answer = result.answer.toLowerCase();
+  let shift = 0;
+  if (/(not covered|excluded)/.test(answer)) shift += 12;
+  if (/prior auth|prior authorization/.test(answer)) shift += 7;
+  if (/step therapy/.test(answer)) shift += 7;
+  if (/quantity limit/.test(answer)) shift += 4;
+  if (/out[- ]of[- ]network/.test(answer)) shift += 9;
+  if (/\bcovered\b/.test(answer) && !/not covered/.test(answer)) shift -= 8;
+  if (/insufficient evidence/.test(answer)) shift += 3;
+  const confidenceWeight = 0.75 + Math.min(1, Math.max(0, result.confidence)) * 0.5;
+  return Math.round(Math.max(-18, Math.min(18, shift * confidenceWeight)));
+}
+
 export default function DenialRiskMeter() {
   const [inputs, setInputs] = useState<RiskInputs>({
     denialType: 'medical_necessity',
@@ -76,6 +94,12 @@ export default function DenialRiskMeter() {
     isOutOfNetwork: false,
     isHighCostTherapy: true,
   });
+  const [serviceName, setServiceName] = useState('Wegovy');
+  const [payerId, setPayerId] = useState('');
+  const { payers, loading: loadingMetadata, error: metadataError } = usePlanMetadata();
+  const [calibration, setCalibration] = useState<QueryResponse | null>(null);
+  const [calibrating, setCalibrating] = useState(false);
+  const [calibrationError, setCalibrationError] = useState('');
 
   const updateNumber = (key: keyof RiskInputs, value: string, min = 0, max = 100) => {
     const parsed = Number(value);
@@ -103,6 +127,8 @@ export default function DenialRiskMeter() {
 
     const scoreRaw = drivers.reduce((sum, item) => sum + item.points, 0);
     const score = clamp(scoreRaw, 0, 100);
+    const policyShift = computePolicyShift(calibration);
+    const calibratedScore = clamp(score + policyShift, 0, 100);
 
     const rankedDrivers = drivers
       .filter(driver => driver.points > 1)
@@ -110,7 +136,7 @@ export default function DenialRiskMeter() {
       .slice(0, 4);
 
     const projectedScore = clamp(
-      score -
+      calibratedScore -
         (100 - inputs.documentationCompleteness) * 0.16 -
         (inputs.hasRecentLabs ? 0 : 6) -
         (inputs.hasUrgencyDocumented ? 0 : 5) -
@@ -119,10 +145,10 @@ export default function DenialRiskMeter() {
       100,
     );
 
-    return { score, rankedDrivers, projectedScore };
-  }, [inputs]);
+    return { score, rankedDrivers, projectedScore, policyShift, calibratedScore };
+  }, [inputs, calibration]);
 
-  const riskTier = bucket(riskComputation.score);
+  const riskTier = bucket(riskComputation.calibratedScore);
   const projectedTier = bucket(riskComputation.projectedScore);
 
   const mitigationSteps = useMemo(() => {
@@ -147,6 +173,27 @@ export default function DenialRiskMeter() {
     }
     return steps.slice(0, 4);
   }, [inputs]);
+
+  const runPolicyCalibration = async () => {
+    setCalibrating(true);
+    setCalibrationError('');
+    try {
+      const response = await postQuery({
+        question: [
+          `For denial type "${DENIAL_LABELS[inputs.denialType]}" and requested therapy "${serviceName.trim() || 'requested service'}",`,
+          'what policy factors most increase denial risk and what signals lower the risk?',
+        ].join(' '),
+        filters: payerId ? { payer_ids: [payerId] } : undefined,
+      });
+      setCalibration(response);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to calibrate risk from policy evidence.';
+      setCalibrationError(message);
+      setCalibration(null);
+    } finally {
+      setCalibrating(false);
+    }
+  };
 
   return (
     <div className="space-y-4">
@@ -263,26 +310,67 @@ export default function DenialRiskMeter() {
               })}
             </div>
           </div>
+
+          <div className="rounded-xl border border-rose-200 bg-rose-50/50 p-3">
+            <p className="text-xs font-semibold uppercase tracking-[0.1em] text-rose-700">Policy calibration</p>
+            <div className="mt-2 grid gap-2 md:grid-cols-2">
+              <input
+                value={serviceName}
+                onChange={event => setServiceName(event.target.value)}
+                placeholder="Drug / service"
+                className="app-input"
+              />
+              <select
+                value={payerId}
+                onChange={event => setPayerId(event.target.value)}
+                className="app-input"
+                disabled={loadingMetadata}
+              >
+                <option value="">All payers</option>
+                {payers.map(payer => (
+                  <option key={payer.payer_id} value={payer.payer_id}>
+                    {payer.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <button
+              onClick={() => void runPolicyCalibration()}
+              disabled={calibrating}
+              className="mt-2 app-button-secondary disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              {calibrating ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
+              Calibrate with policy data
+            </button>
+            {metadataError && <p className="mt-2 text-xs text-amber-700">{metadataError}</p>}
+            {calibrationError && <p className="mt-2 text-xs text-rose-700">{calibrationError}</p>}
+          </div>
         </div>
 
         <aside className="space-y-4">
           <div className="app-surface p-5">
             <p className="text-xs font-semibold uppercase tracking-[0.1em] text-slate-500">Current risk</p>
             <div className="mt-2 flex items-end justify-between">
-              <p className="text-4xl font-semibold text-slate-900">{Math.round(riskComputation.score)}</p>
+              <p className="text-4xl font-semibold text-slate-900">{Math.round(riskComputation.calibratedScore)}</p>
               <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${riskTier.style}`}>
                 {riskTier.label}
               </span>
             </div>
             <div className="mt-3 h-3 rounded-full bg-slate-200">
               <div
-                className={`h-3 rounded-full bg-gradient-to-r ${riskBarStyle(riskComputation.score)}`}
-                style={{ width: `${riskComputation.score}%` }}
+                className={`h-3 rounded-full bg-gradient-to-r ${riskBarStyle(riskComputation.calibratedScore)}`}
+                style={{ width: `${riskComputation.calibratedScore}%` }}
               />
             </div>
             <p className="mt-2 text-xs text-slate-500">
               Higher score means higher probability of denial friction without mitigation.
             </p>
+            {!!riskComputation.policyShift && (
+              <p className="mt-1 text-xs text-slate-600">
+                Policy signal adjustment: {riskComputation.policyShift >= 0 ? '+' : ''}
+                {riskComputation.policyShift} points
+              </p>
+            )}
           </div>
 
           <div className="app-surface p-5">
@@ -307,11 +395,24 @@ export default function DenialRiskMeter() {
             </div>
             <p className="mt-1 flex items-center gap-1.5 text-xs text-emerald-800">
               <TrendingDown className="h-3.5 w-3.5" />
-              Potential reduction: {Math.round(riskComputation.score - riskComputation.projectedScore)} points
+              Potential reduction: {Math.round(riskComputation.calibratedScore - riskComputation.projectedScore)} points
             </p>
           </div>
         </aside>
       </div>
+
+      {calibration && (
+        <div className="app-surface p-5">
+          <h4 className="text-sm font-semibold uppercase tracking-[0.1em] text-slate-500">Policy evidence summary</h4>
+          <p className="mt-2 text-sm text-slate-700">{calibration.answer}</p>
+          {!!calibration.citations.length && (
+            <p className="mt-2 text-xs text-slate-500">
+              Source: {calibration.citations[0].section || 'Policy text'}
+              {calibration.citations[0].page ? ` - p.${calibration.citations[0].page}` : ''}
+            </p>
+          )}
+        </div>
+      )}
 
       <div className="app-surface p-5">
         <h4 className="text-sm font-semibold uppercase tracking-[0.1em] text-slate-500">Mitigation playbook</h4>

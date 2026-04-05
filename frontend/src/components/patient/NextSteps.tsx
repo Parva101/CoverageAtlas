@@ -25,9 +25,9 @@ export default function NextSteps({ result }: Props) {
   steps.push('Ask your doctor\'s office about helping with the authorization process.');
 
   return (
-    <div className="bg-white rounded-2xl border border-slate-200 p-5">
+    <div className="glass-card p-5">
       <div className="flex items-center gap-2.5 mb-4">
-        <div className="w-8 h-8 rounded-lg bg-blue-50 flex items-center justify-center">
+        <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center shadow-sm">
           <ClipboardList className="w-4 h-4 text-blue-600" />
         </div>
         <h3 className="text-sm font-semibold text-slate-900">What you may need to do</h3>
@@ -35,7 +35,7 @@ export default function NextSteps({ result }: Props) {
       <ul className="space-y-2.5">
         {steps.map((step, i) => (
           <li key={i} className="flex items-start gap-3 group">
-            <div className="flex items-center justify-center w-5 h-5 rounded-full bg-blue-600 text-white text-xs font-bold shrink-0 mt-0.5">
+            <div className="flex items-center justify-center w-5 h-5 rounded-full bg-gradient-to-br from-blue-600 to-indigo-600 text-white text-xs font-bold shrink-0 mt-0.5 shadow-sm">
               {i + 1}
             </div>
             <div className="flex-1 flex items-start justify-between gap-2">

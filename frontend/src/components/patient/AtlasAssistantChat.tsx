@@ -3,7 +3,6 @@ import { Link } from 'react-router-dom';
 import { Bot, Loader2, PhoneCall, Send, Shield, Sparkles, User } from 'lucide-react';
 import { postQuery } from '../../api/client';
 import type { QueryResponse } from '../../types';
-import { usePlanMetadata } from '../../hooks/usePlanMetadata';
 import AnswerCard from './AnswerCard';
 import NextSteps from './NextSteps';
 import TermHelper from './TermHelper';
@@ -20,10 +19,10 @@ interface ChatTurn {
 const ASSISTANT_NAME = 'Atlas';
 const DEFAULT_TWILIO_NUMBER = '+1 (602) 610-0653';
 const SUGGESTIONS = [
-  'What documents should I prepare before asking for prior authorization?',
-  'Does my plan likely cover Wegovy and what restrictions should I expect?',
-  'How do I explain medical necessity when a claim gets denied?',
-  'Give me a short script I can use when calling my insurance plan.',
+  'Does my plan cover rituximab for rheumatoid arthritis, and what are the criteria?',
+  'What prior authorization requirements apply to my treatment and what documents are needed?',
+  'What changed in my payer policy this quarter for my drug under medical benefit?',
+  'Compare policy requirements for this drug across two payers and explain the differences.',
 ];
 
 function toTel(value: string): string {
@@ -32,8 +31,6 @@ function toTel(value: string): string {
 
 export default function AtlasAssistantChat() {
   const [question, setQuestion] = useState('');
-  const [payerId, setPayerId] = useState('');
-  const { payers, loading: loadingMetadata, error: metadataError } = usePlanMetadata();
   const [loading, setLoading] = useState(false);
   const [turns, setTurns] = useState<ChatTurn[]>([]);
   const [error, setError] = useState('');
@@ -65,7 +62,6 @@ export default function AtlasAssistantChat() {
     try {
       const response = await postQuery({
         question: clean,
-        filters: payerId ? { payer_ids: [payerId] } : undefined,
       });
       setTurns(prev => prev.map(turn => (turn.id === turnId ? { ...turn, response } : turn)));
     } catch (err: unknown) {
@@ -126,25 +122,8 @@ export default function AtlasAssistantChat() {
                 </div>
                 <div>
                   <p className="text-sm font-semibold text-slate-900">{ASSISTANT_NAME} Chat</p>
-                  <p className="text-xs text-slate-500">Policy Q&A with citations</p>
+                  <p className="text-xs text-slate-500">Profile-aware policy Q&A with citations</p>
                 </div>
-              </div>
-
-              <div className="min-w-[210px]">
-                <select
-                  value={payerId}
-                  onChange={event => setPayerId(event.target.value)}
-                  className="w-full px-3 py-2 border border-slate-200 rounded-xl text-xs bg-white focus:outline-none focus:ring-2 focus:ring-cyan-500"
-                  disabled={loadingMetadata}
-                >
-                  <option value="">All plans</option>
-                  {payers.map(payer => (
-                    <option key={payer.payer_id} value={payer.payer_id}>
-                      {payer.name}
-                    </option>
-                  ))}
-                </select>
-                {metadataError && <p className="text-[11px] text-amber-700 mt-1">{metadataError}</p>}
               </div>
             </div>
 
@@ -155,7 +134,7 @@ export default function AtlasAssistantChat() {
                     <div className="w-14 h-14 mx-auto rounded-2xl bg-cyan-100 flex items-center justify-center">
                       <Sparkles className="w-7 h-7 text-cyan-700" />
                     </div>
-                    <p className="mt-3 text-sm font-semibold text-slate-800">Ask {ASSISTANT_NAME} anything about coverage policy.</p>
+                    <p className="mt-3 text-sm font-semibold text-slate-800">Ask {ASSISTANT_NAME} about medical-benefit policy criteria.</p>
                     <p className="text-xs text-slate-500 mt-1">Example prompts to start:</p>
                   </div>
                   <div className="grid gap-2">

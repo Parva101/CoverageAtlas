@@ -9,7 +9,10 @@ psycopg2-binary==2.9.9
 qdrant-client==1.17.1
 
 # AI / Embeddings
+google-generativeai==0.7.2
 google-genai==1.70.0
+google-cloud-speech==2.38.0
+google-cloud-texttospeech==2.36.0
 
 # PDF parsing
 pdfplumber==0.11.0
@@ -25,14 +28,19 @@ redis==5.0.6
 
 # Auth
 PyJWT[crypto]==2.8.0
+python-jose[cryptography]==3.3.0
+
+# Scraper deps
+chromadb==0.5.3
+tqdm==4.66.4
 
 # Utilities
 python-dotenv==1.0.1
 python-multipart==0.0.9
 
 # LiveKit voice agent
-livekit-agents
-livekit-plugins-silero
-livekit-plugins-google
-livekit-plugins-elevenlabs
-livekit-plugins-deepgram
+livekit-agents==1.5.1
+livekit-plugins-silero==1.5.1
+livekit-plugins-google==1.5.1
+livekit-plugins-elevenlabs==1.5.1
+livekit-plugins-deepgram==1.5.1

@@ -12,13 +12,17 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 AuthClaims = dict[str, Any]
 
 ALGORITHMS = ["RS256"]
-JWKS_CACHE_TTL_SECONDS = int(os.environ.get("AUTH0_JWKS_CACHE_TTL_SECONDS", "3600"))
-_DEV_BYPASS_ENABLED = os.environ.get("AUTH0_ALLOW_DEV_BYPASS", "1").strip().lower() in {
-    "1",
-    "true",
-    "yes",
-    "on",
-}
+DEFAULT_ADMIN_SCOPE = "admin:write"
+
+
+def _parse_int(value: str, default: int) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+JWKS_CACHE_TTL_SECONDS = _parse_int(os.environ.get("AUTH0_JWKS_CACHE_TTL_SECONDS", "3600"), 3600)
 
 _jwks_cache: dict[str, Any] = {"value": None, "expires_at": 0.0}
 _jwks_lock = Lock()
@@ -26,7 +30,20 @@ _jwks_lock = Lock()
 bearer_scheme = HTTPBearer(auto_error=False)
 
 
-def _load_jwt():
+def _is_truthy(value: str) -> bool:
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def is_auth_enabled() -> bool:
+    explicit = os.environ.get("AUTH0_ENABLED")
+    if explicit is not None and explicit.strip():
+        return _is_truthy(explicit)
+
+    # If explicit flag is absent, auto-enable only when core Auth0 settings exist.
+    return bool(os.environ.get("AUTH0_DOMAIN", "").strip() and os.environ.get("AUTH0_AUDIENCE", "").strip())
+
+
+def _load_jose():
     try:
         import jwt
         from jwt.exceptions import PyJWTError
@@ -186,21 +203,27 @@ def _extract_scopes(payload: AuthClaims) -> set[str]:
     return scopes
 
 
+def extract_scopes(payload: AuthClaims) -> set[str]:
+    return _extract_scopes(payload)
+
+
+def _dev_claims() -> AuthClaims:
+    admin_scope = os.environ.get("AUTH0_ADMIN_SCOPE", DEFAULT_ADMIN_SCOPE).strip()
+    permissions = [admin_scope] if admin_scope else []
+    scope_text = " ".join(permissions)
+    return {
+        "sub": "local-dev-user",
+        "permissions": permissions,
+        "scope": scope_text,
+        "auth_mode": "disabled",
+    }
+
+
 def require_auth0_token(
     credentials: HTTPAuthorizationCredentials = Security(bearer_scheme),
 ) -> AuthClaims:
-    if not auth0_is_configured():
-        if _DEV_BYPASS_ENABLED:
-            return {
-                "sub": os.environ.get("AUTH0_DEV_SUB", "dev-user"),
-                "scope": os.environ.get("AUTH0_ADMIN_SCOPE", "admin:write"),
-                "permissions": [os.environ.get("AUTH0_ADMIN_SCOPE", "admin:write")],
-                "auth_mode": "dev_bypass",
-            }
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Auth0 is not configured.",
-        )
+    if not is_auth_enabled():
+        return _dev_claims()
 
     if credentials is None or credentials.scheme.lower() != "bearer":
         raise HTTPException(
@@ -213,7 +236,10 @@ def require_auth0_token(
 
 
 def require_admin_auth(payload: AuthClaims = Depends(require_auth0_token)) -> AuthClaims:
-    required_scope = os.environ.get("AUTH0_ADMIN_SCOPE", "admin:write").strip()
+    if not is_auth_enabled():
+        return payload
+
+    required_scope = os.environ.get("AUTH0_ADMIN_SCOPE", DEFAULT_ADMIN_SCOPE).strip()
     if not required_scope:
         return payload
 

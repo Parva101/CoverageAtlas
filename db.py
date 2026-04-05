@@ -12,6 +12,7 @@ import os
 import json
 import uuid
 import logging
+import threading
 from contextlib import contextmanager
 from datetime import datetime, date
 from typing import Any, Optional
@@ -25,6 +26,8 @@ DATABASE_URL = os.environ.get(
 )
 
 log = logging.getLogger(__name__)
+_USER_PROFILES_SCHEMA_READY = False
+_USER_PROFILES_SCHEMA_LOCK = threading.Lock()
 
 # ── Connection pool (simple, no external lib needed for hackathon) ──────────
 
@@ -120,8 +123,26 @@ def list_plans_by_ids(conn, plan_ids: list[str]) -> list[dict]:
         return []
     return fetchall(
         conn,
-        "SELECT * FROM plans WHERE id = ANY(%s)",
+        "SELECT * FROM plans WHERE id::text = ANY(%s)",
         (plan_ids,),
+    )
+
+
+def list_plans(conn) -> list[dict]:
+    return fetchall(
+        conn,
+        """
+        SELECT
+            pl.id,
+            pl.payer_id,
+            pl.plan_name,
+            pl.plan_type,
+            pl.market,
+            p.name AS payer_name
+        FROM plans pl
+        JOIN payers p ON pl.payer_id = p.id
+        ORDER BY p.name, pl.plan_name
+        """,
     )
 
 
@@ -200,6 +221,56 @@ def list_policies_for_payer(conn, payer_id: str) -> list[dict]:
         "SELECT * FROM policies WHERE payer_id = %s ORDER BY policy_title",
         (payer_id,)
     )
+
+
+def list_policies_with_versions(conn) -> list[dict]:
+    rows = fetchall(
+        conn,
+        """
+        SELECT
+            pol.id::text AS policy_id,
+            pol.payer_id::text AS payer_id,
+            p.name AS payer_name,
+            pol.policy_title,
+            pol.policy_category,
+            pv.id::text AS version_id,
+            pv.version_label,
+            pv.effective_date,
+            pv.published_date,
+            pv.is_current,
+            pv.created_at AS version_created_at
+        FROM policies pol
+        JOIN payers p ON pol.payer_id = p.id
+        LEFT JOIN policy_versions pv ON pv.policy_id = pol.id
+        ORDER BY p.name, pol.policy_title, pv.effective_date DESC NULLS LAST, pv.created_at DESC
+        """,
+    )
+
+    by_policy: dict[str, dict] = {}
+    for row in rows:
+        policy_id = str(row["policy_id"])
+        entry = by_policy.get(policy_id)
+        if entry is None:
+            entry = {
+                "policy_id": policy_id,
+                "payer_id": str(row["payer_id"]),
+                "payer_name": row["payer_name"],
+                "policy_title": row["policy_title"],
+                "policy_category": row["policy_category"],
+                "versions": [],
+            }
+            by_policy[policy_id] = entry
+
+        if row.get("version_id"):
+            entry["versions"].append({
+                "version_id": str(row["version_id"]),
+                "version_label": row.get("version_label"),
+                "effective_date": row.get("effective_date"),
+                "published_date": row.get("published_date"),
+                "is_current": bool(row.get("is_current", False)),
+            })
+
+    return list(by_policy.values())
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -372,6 +443,145 @@ def get_recent_changes(conn, limit: int = 50) -> list[dict]:
     """, (limit,))
 
 
+def _coerce_text_list(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        out: list[str] = []
+        for item in value:
+            normalized = str(item).strip()
+            if normalized:
+                out.append(normalized)
+        return out
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return []
+        try:
+            parsed = json.loads(stripped)
+            if isinstance(parsed, list):
+                return _coerce_text_list(parsed)
+        except Exception:
+            pass
+        return [piece.strip() for piece in stripped.split(",") if piece.strip()]
+    return [str(value).strip()]
+
+
+def ensure_user_profiles_table(conn):
+    global _USER_PROFILES_SCHEMA_READY
+    if _USER_PROFILES_SCHEMA_READY:
+        return
+
+    with _USER_PROFILES_SCHEMA_LOCK:
+        if _USER_PROFILES_SCHEMA_READY:
+            return
+
+        # Prevent concurrent DDL from multiple processes hitting this lazily on first request.
+        execute(conn, "SELECT pg_advisory_xact_lock(hashtext('coverageatlas_user_profiles_schema'))")
+        execute(conn, """
+            CREATE TABLE IF NOT EXISTS user_profiles (
+                user_id            TEXT        PRIMARY KEY,
+                full_name          TEXT,
+                email              TEXT,
+                phone              TEXT,
+                date_of_birth      DATE,
+                state              TEXT,
+                member_id          TEXT,
+                preferred_language TEXT,
+                preferred_channel  TEXT        CHECK (preferred_channel IN ('web','voice','email')),
+                primary_plan_id    TEXT,
+                chronic_conditions JSONB       NOT NULL DEFAULT '[]',
+                medications        JSONB       NOT NULL DEFAULT '[]',
+                notes              TEXT,
+                created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """)
+        execute(conn, "CREATE INDEX IF NOT EXISTS idx_user_profiles_email ON user_profiles(email)")
+        execute(conn, "CREATE INDEX IF NOT EXISTS idx_user_profiles_plan ON user_profiles(primary_plan_id)")
+        _USER_PROFILES_SCHEMA_READY = True
+
+
+def _normalize_profile_row(row: Optional[dict]) -> Optional[dict]:
+    if row is None:
+        return None
+
+    normalized = dict(row)
+    normalized["user_id"] = str(normalized.get("user_id") or "")
+    normalized["chronic_conditions"] = _coerce_text_list(normalized.get("chronic_conditions"))
+    normalized["medications"] = _coerce_text_list(normalized.get("medications"))
+    dob = normalized.get("date_of_birth")
+    if isinstance(dob, date):
+        normalized["date_of_birth"] = dob.isoformat()
+    elif dob is None:
+        normalized["date_of_birth"] = None
+    else:
+        normalized["date_of_birth"] = str(dob)
+    return normalized
+
+
+def get_user_profile(conn, user_id: str) -> Optional[dict]:
+    ensure_user_profiles_table(conn)
+    row = fetchone(
+        conn,
+        "SELECT * FROM user_profiles WHERE user_id = %s",
+        (user_id,),
+    )
+    return _normalize_profile_row(row)
+
+
+def upsert_user_profile(conn, user_id: str, profile: dict) -> dict:
+    ensure_user_profiles_table(conn)
+    row = fetchone(
+        conn,
+        """
+        INSERT INTO user_profiles (
+            user_id, full_name, email, phone, date_of_birth, state, member_id,
+            preferred_language, preferred_channel, primary_plan_id,
+            chronic_conditions, medications, notes
+        )
+        VALUES (
+            %s, %s, %s, %s, %s, %s, %s,
+            %s, %s, %s, %s, %s, %s
+        )
+        ON CONFLICT (user_id) DO UPDATE SET
+            full_name = EXCLUDED.full_name,
+            email = EXCLUDED.email,
+            phone = EXCLUDED.phone,
+            date_of_birth = EXCLUDED.date_of_birth,
+            state = EXCLUDED.state,
+            member_id = EXCLUDED.member_id,
+            preferred_language = EXCLUDED.preferred_language,
+            preferred_channel = EXCLUDED.preferred_channel,
+            primary_plan_id = EXCLUDED.primary_plan_id,
+            chronic_conditions = EXCLUDED.chronic_conditions,
+            medications = EXCLUDED.medications,
+            notes = EXCLUDED.notes,
+            updated_at = NOW()
+        RETURNING *
+        """,
+        (
+            user_id,
+            profile.get("full_name"),
+            profile.get("email"),
+            profile.get("phone"),
+            profile.get("date_of_birth"),
+            profile.get("state"),
+            profile.get("member_id"),
+            profile.get("preferred_language"),
+            profile.get("preferred_channel"),
+            profile.get("primary_plan_id"),
+            json.dumps(_coerce_text_list(profile.get("chronic_conditions"))),
+            json.dumps(_coerce_text_list(profile.get("medications"))),
+            profile.get("notes"),
+        ),
+    )
+    normalized = _normalize_profile_row(row)
+    if normalized is None:
+        raise RuntimeError("Profile upsert failed unexpectedly")
+    return normalized
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # QA SESSIONS + MESSAGES
 # ══════════════════════════════════════════════════════════════════════════════
@@ -443,7 +653,7 @@ def compare_drug_across_plans(conn, drug_name: str,
     """
     params = [f"%{drug_name.lower()}%"]
     if payer_ids:
-        sql    += " AND p.id = ANY(%s)"
+        sql    += " AND p.id::text = ANY(%s)"
         params.append(payer_ids)
     sql += " ORDER BY p.name"
     return fetchall(conn, sql, params)

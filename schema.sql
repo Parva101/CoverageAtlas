@@ -314,6 +314,31 @@ CREATE TABLE IF NOT EXISTS qa_messages (
 CREATE INDEX IF NOT EXISTS idx_qa_messages_session ON qa_messages(session_id);
 CREATE INDEX IF NOT EXISTS idx_qa_messages_role    ON qa_messages(role);
 
+-- ============================================================
+-- 10. USER PROFILES
+--    Per-user profile and preferences (keyed by Auth0 sub)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS user_profiles (
+    user_id                TEXT        PRIMARY KEY, -- Auth0 sub
+    full_name              TEXT,
+    email                  TEXT,
+    phone                  TEXT,
+    date_of_birth          DATE,
+    state                  TEXT,
+    member_id              TEXT,
+    preferred_language     TEXT,
+    preferred_channel      TEXT        CHECK (preferred_channel IN ('web','voice','email')),
+    primary_plan_id        TEXT,
+    chronic_conditions     JSONB       NOT NULL DEFAULT '[]',
+    medications            JSONB       NOT NULL DEFAULT '[]',
+    notes                  TEXT,
+    created_at             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at             TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_profiles_email ON user_profiles(email);
+CREATE INDEX IF NOT EXISTS idx_user_profiles_plan  ON user_profiles(primary_plan_id);
+
 -- ────────────────────────────────────────────────────────────
 -- SEED: Known major payers (safe to re-run, ON CONFLICT skips)
 -- ────────────────────────────────────────────────────────────

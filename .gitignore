@@ -10,3 +10,7 @@ insurance_policies/
 backend/.env
 backend/.env.local
 coverageatlas-492308-dd5a89f49ca8.json
+frontend/.env
+frontend/.env.local
+frontend/.env.development.local
+frontend/.env.production.local

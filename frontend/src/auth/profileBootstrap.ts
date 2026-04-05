@@ -68,10 +68,12 @@ export function saveSignupProfileBootstrap(
   data: Pick<Auth0ProfileBootstrap, 'fullName' | 'phone'>,
 ): void {
   const existing = readAuth0ProfileBootstrap() || { fullName: '', email: '', phone: '' };
+  const incomingFullName = normalize(data.fullName);
+  const incomingPhone = normalize(data.phone);
   persistBootstrap({
-    fullName: normalize(data.fullName),
+    fullName: incomingFullName || existing.fullName,
     email: existing.email,
-    phone: normalize(data.phone),
+    phone: incomingPhone || existing.phone,
   });
 }
 

@@ -18,6 +18,8 @@ TOOL OUTPUT CONTRACT (IMPORTANT)
   - error (only when ok=false)
 - Always decide your next step from next_action and status.
 - Never invent tool results.
+- If query_policy returns customer_help, turn it into actionable advice:
+  what to prepare, what to ask insurer, and immediate next steps.
 
 WHEN TO USE TOOLS VS NORMAL CONVERSATION
 - At start of each call, use get_user_context once to see known profile fields and missing fields.

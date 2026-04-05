@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional, Annotated
@@ -49,6 +50,7 @@ class SessionState:
     default_drug_name: Optional[str] = None
     default_condition: Optional[str] = None
     default_effective_on: Optional[str] = None
+    voice_session_id: Optional[str] = None
 
     def __post_init__(self) -> None:
         if self.default_plan_ids is None:
@@ -192,6 +194,174 @@ class PolicyAgent(Agent):
 
         return await asyncio.to_thread(_request)
 
+    @staticmethod
+    def _normalize_text(value: Optional[str]) -> str:
+        return re.sub(r"\s+", " ", (value or "").strip().lower())
+
+    async def _resolve_plan_filters(
+        self,
+        *,
+        payer_name: Optional[str],
+        plan_name: Optional[str],
+    ) -> dict[str, list[str]]:
+        normalized_payer = self._normalize_text(payer_name)
+        normalized_plan = self._normalize_text(plan_name)
+        if not normalized_payer and not normalized_plan:
+            return {"plan_ids": [], "payer_ids": []}
+
+        response = await self._get_json("/api/v1/metadata/plans")
+        status_code = response.get("_http_status")
+        if status_code is None or status_code >= 400:
+            self._logger.warning(
+                "Unable to resolve plan filters from metadata endpoint: %s",
+                {
+                    "status_code": status_code,
+                    "error": response.get("error") or response.get("_transport_error"),
+                },
+            )
+            return {"plan_ids": [], "payer_ids": []}
+
+        plans = response.get("plans", [])
+        if not isinstance(plans, list):
+            return {"plan_ids": [], "payer_ids": []}
+
+        matched_plan_ids: set[str] = set()
+        matched_payer_ids: set[str] = set()
+
+        for row in plans:
+            if not isinstance(row, dict):
+                continue
+            plan_id = str(row.get("plan_id", "")).strip()
+            payer_id = str(row.get("payer_id", "")).strip()
+            row_plan = self._normalize_text(str(row.get("plan_name", "")))
+            row_payer = self._normalize_text(str(row.get("payer_name", "")))
+
+            payer_match = not normalized_payer or (
+                normalized_payer in row_payer or row_payer in normalized_payer
+            )
+            plan_match = not normalized_plan or (
+                normalized_plan in row_plan or row_plan in normalized_plan
+            )
+
+            if payer_match and plan_match:
+                if plan_id:
+                    matched_plan_ids.add(plan_id)
+                if payer_id:
+                    matched_payer_ids.add(payer_id)
+
+        # If we only matched by payer and no specific plan could be found, keep payer scope.
+        if not matched_plan_ids and normalized_payer:
+            for row in plans:
+                if not isinstance(row, dict):
+                    continue
+                payer_id = str(row.get("payer_id", "")).strip()
+                row_payer = self._normalize_text(str(row.get("payer_name", "")))
+                if payer_id and (normalized_payer in row_payer or row_payer in normalized_payer):
+                    matched_payer_ids.add(payer_id)
+
+        return {
+            "plan_ids": sorted(matched_plan_ids),
+            "payer_ids": sorted(matched_payer_ids),
+        }
+
+    async def _build_query_filters(
+        self,
+        *,
+        state: Optional[SessionState],
+        payer_name: Optional[str],
+        plan_name: Optional[str],
+        effective_on: Optional[str],
+    ) -> dict[str, Any]:
+        plan_ids: set[str] = set()
+        payer_ids: set[str] = set()
+
+        if state and state.default_plan_ids:
+            plan_ids.update(v for v in state.default_plan_ids if isinstance(v, str) and v.strip())
+
+        resolved = await self._resolve_plan_filters(
+            payer_name=payer_name or (state.default_payer_name if state else None),
+            plan_name=plan_name or (state.default_plan_name if state else None),
+        )
+        plan_ids.update(resolved.get("plan_ids", []))
+        payer_ids.update(resolved.get("payer_ids", []))
+
+        filters: dict[str, Any] = {}
+        if plan_ids:
+            filters["plan_ids"] = sorted(plan_ids)
+        elif payer_ids:
+            filters["payer_ids"] = sorted(payer_ids)
+
+        clean_effective_on = (effective_on or "").strip()
+        if clean_effective_on:
+            filters["effective_on"] = clean_effective_on
+        return filters
+
+    async def _ensure_voice_session(self, state: Optional[SessionState]) -> Optional[str]:
+        if state is None:
+            return None
+        if state.voice_session_id:
+            return state.voice_session_id
+
+        payload: dict[str, Any] = {}
+        if state.user_id:
+            payload["user_id"] = state.user_id
+
+        response = await self._post_json("/api/v1/voice/session/start", payload)
+        status_code = response.get("_http_status")
+        if status_code is None or status_code >= 400:
+            self._logger.warning(
+                "Unable to start voice QA session, falling back to /query endpoint: %s",
+                {
+                    "status_code": status_code,
+                    "error": response.get("error") or response.get("_transport_error"),
+                },
+            )
+            return None
+
+        session_id = str(response.get("session_id", "")).strip()
+        if not session_id:
+            self._logger.warning("Voice session start response missing session_id: %s", response)
+            return None
+
+        state.voice_session_id = session_id
+        self._logger.info("Voice QA session started: %s", session_id)
+        return session_id
+
+    async def _post_voice_turn(
+        self,
+        *,
+        state: Optional[SessionState],
+        utterance: str,
+        filters: dict[str, Any],
+        top_k: int,
+    ) -> dict[str, Any]:
+        session_id = await self._ensure_voice_session(state)
+        if not session_id:
+            return {"_http_status": None, "_transport_error": "voice_session_unavailable"}
+
+        payload: dict[str, Any] = {
+            "utterance": utterance,
+            "filters": filters or {},
+            "retrieval": {"top_k": top_k, "hybrid": True},
+        }
+        response = await self._post_json(f"/api/v1/voice/session/{session_id}/turn", payload)
+        status_code = response.get("_http_status")
+
+        # session ownership/state can drift if backend restarted; re-open once then retry.
+        if status_code in {403, 404} and state is not None:
+            self._logger.warning(
+                "Voice turn failed with session status %s, retrying with a new session.",
+                status_code,
+            )
+            state.voice_session_id = None
+            fresh_session_id = await self._ensure_voice_session(state)
+            if fresh_session_id:
+                response = await self._post_json(
+                    f"/api/v1/voice/session/{fresh_session_id}/turn",
+                    payload,
+                )
+        return response
+
     @function_tool()
     async def get_user_context(
         self,
@@ -263,6 +433,25 @@ class PolicyAgent(Agent):
                 retryable=False,
             )
 
+        if state:
+            if resolved_payer_name:
+                state.default_payer_name = resolved_payer_name
+            if resolved_plan_name:
+                state.default_plan_name = resolved_plan_name
+            if resolved_drug_name:
+                state.default_drug_name = resolved_drug_name
+            if resolved_condition:
+                state.default_condition = resolved_condition
+            if resolved_effective_on:
+                state.default_effective_on = resolved_effective_on
+
+        filters = await self._build_query_filters(
+            state=state,
+            payer_name=resolved_payer_name,
+            plan_name=resolved_plan_name,
+            effective_on=resolved_effective_on,
+        )
+
         hints = []
         if resolved_payer_name:
             hints.append(f"payer={resolved_payer_name}")
@@ -273,18 +462,12 @@ class PolicyAgent(Agent):
         if resolved_condition:
             hints.append(f"condition={resolved_condition}")
 
-        augmented_question = clean_question
-        if hints:
-            augmented_question += "\n\nCaller context hints: " + ", ".join(hints)
+        # Keep the spoken question natural; only append context hints when structured filters are not available.
+        query_text = clean_question
+        if hints and not (filters.get("plan_ids") or filters.get("payer_ids")):
+            query_text = clean_question + "\n\nCaller context hints: " + ", ".join(hints)
 
         safe_top_k = max(1, min(int(top_k), 20))
-        payload: dict[str, Any] = {
-            "question": augmented_question,
-            "retrieval": {"top_k": safe_top_k, "hybrid": True},
-            "filters": {},
-        }
-        if resolved_effective_on:
-            payload["filters"]["effective_on"] = resolved_effective_on
 
         self._logger.info(
             "query_policy input=%s",
@@ -295,12 +478,28 @@ class PolicyAgent(Agent):
                 "drug_name": resolved_drug_name,
                 "condition": resolved_condition,
                 "effective_on": resolved_effective_on,
+                "filters": filters,
                 "top_k": safe_top_k,
             },
         )
 
-        response = await self._post_json("/api/v1/query", payload)
+        response = await self._post_voice_turn(
+            state=state,
+            utterance=query_text,
+            filters=filters,
+            top_k=safe_top_k,
+        )
         status_code = response.get("_http_status")
+
+        # Fallback path when voice-session endpoints are unavailable.
+        if status_code is None or status_code >= 400:
+            payload: dict[str, Any] = {
+                "question": query_text,
+                "retrieval": {"top_k": safe_top_k, "hybrid": True},
+                "filters": filters,
+            }
+            response = await self._post_json("/api/v1/query", payload)
+            status_code = response.get("_http_status")
 
         if status_code is None:
             return self._fail(
@@ -318,6 +517,21 @@ class PolicyAgent(Agent):
                 code="api_error",
                 message=str(response.get("error", response.get("raw_text", "Query API returned an error."))),
                 retryable=True,
+            )
+
+        missing_labels = response.get("missing_profile_field_labels") or response.get("missing_profile_fields") or []
+        needs_profile = bool(response.get("needs_profile_completion"))
+        if needs_profile:
+            return self._ok(
+                status="profile_incomplete",
+                next_action="ask_missing_profile_fields",
+                data={
+                    "answer": response.get("answer"),
+                    "missing_profile_fields": response.get("missing_profile_fields", []),
+                    "missing_profile_field_labels": missing_labels,
+                    "profile_completion_url": response.get("profile_completion_url", "/profile"),
+                    "profile_snapshot": response.get("profile_snapshot", {}),
+                },
             )
 
         answer = response.get("answer")
@@ -339,6 +553,11 @@ class PolicyAgent(Agent):
                 "citations": response.get("citations", []),
                 "retrieval_trace": response.get("retrieval_trace", {}),
                 "disclaimer": response.get("disclaimer"),
+                "reasoning": response.get("reasoning", {}),
+                "evidence_cards": response.get("evidence_cards", []),
+                "customer_help": response.get("customer_help", {}),
+                "needs_profile_completion": response.get("needs_profile_completion", False),
+                "profile_snapshot": response.get("profile_snapshot", {}),
             },
         )
 
@@ -475,6 +694,7 @@ class PolicyAgent(Agent):
         profile_context = ""
         if state:
             profile_context = self._profile_summary(state)
+            await self._ensure_voice_session(state)
 
         if state and state.is_signed_in:
             if state.is_registered is False:

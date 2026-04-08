@@ -47,9 +47,9 @@ import requests
 # â”€â”€ Gemini (for smoke test) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 import ai_provider
 
-QDRANT_URL        = os.environ.get("QDRANT_URL",        "http://10.157.92.242:6333/")
-QDRANT_API_KEY    = os.environ.get("QDRANT_API_KEY",    "")
-QDRANT_COLLECTION = os.environ.get("QDRANT_COLLECTION", "policy_chunks")
+QDRANT_URL        = os.environ.get("QDRANT_URL",        "http://10.157.92.242:6333/").strip()
+QDRANT_API_KEY    = os.environ.get("QDRANT_API_KEY",    "").strip()
+QDRANT_COLLECTION = os.environ.get("QDRANT_COLLECTION", "policy_chunks").strip() or "policy_chunks"
 EMBED_MODEL       = os.environ.get("EMBEDDING_MODEL", "gemini-embedding-001")
 
 VECTOR_DIM = int(os.environ.get("EMBEDDING_DIM", "768"))
